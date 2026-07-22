@@ -492,24 +492,38 @@ function setPreviewText(side, title, text, source) {
   updatePreviewHeaderButtons(side);
 
   let lastTap = { time: 0, x: 0, y: 0 };
-  pre.addEventListener("pointerup", event => {
-    if (event.pointerType !== "touch" && event.detail < 2) return;
+
+  pre.addEventListener("touchstart", event => {
+    if (event.touches.length > 1) return;
+    // Safari darf aus der Tippfolge keinen Seitenzoom ableiten.
+    event.preventDefault();
+  }, { passive: false });
+
+  pre.addEventListener("touchend", event => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const touch = event.changedTouches[0];
+    if (!touch) return;
 
     const now = Date.now();
-    const isDouble = event.pointerType !== "touch"
-      ? event.detail >= 2
-      : now - lastTap.time <= 430
-        && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= 34;
+    const isDouble = now - lastTap.time <= 430
+      && Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) <= 34;
 
     if (isDouble) {
-      event.preventDefault();
-      event.stopPropagation();
-      const caretOffset = textOffsetAtPoint(pre, event.clientX, event.clientY);
+      const caretOffset = textOffsetAtPoint(pre, touch.clientX, touch.clientY);
       beginPreviewEdit(side, caretOffset);
       lastTap = { time: 0, x: 0, y: 0 };
     } else {
-      lastTap = { time: now, x: event.clientX, y: event.clientY };
+      lastTap = { time: now, x: touch.clientX, y: touch.clientY };
     }
+  }, { passive: false });
+
+  pre.addEventListener("dblclick", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const caretOffset = textOffsetAtPoint(pre, event.clientX, event.clientY);
+    beginPreviewEdit(side, caretOffset);
   });
 }
 
@@ -2202,6 +2216,14 @@ async function saveSettings(event) {
   el.settingsDialog.close();
   await syncNow();
 }
+
+// iPad/Safari: Seitenzoom vollständig sperren. Der Canvas verwendet seinen eigenen Pinch-Zoom.
+document.addEventListener("touchend", event => {
+  const target = event.target;
+  if (target?.closest?.(".clock-canvas")) return;
+  if (isEditableTarget(target)) return;
+  event.preventDefault();
+}, { passive: false, capture: true });
 
 // iPad: Browser-Zoom außerhalb des Canvas unterbinden.
 for (const block of document.querySelectorAll('.topbar, .sidebar')) {

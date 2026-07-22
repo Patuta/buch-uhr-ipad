@@ -394,3 +394,18 @@ body.sidebars-hidden .canvas-wrap {
 .swipe-delete-ready {
   background: #7a2727 !important;
 }
+
+
+/* v23: Safari-Seitenzoom in Vorschau und Leisten vollständig verhindern. */
+.topbar,
+.sidebar,
+.side-preview,
+.side-preview-body,
+.preview-text,
+.side-preview-editor {
+  touch-action: manipulation;
+}
+.preview-text {
+  -webkit-user-select: text;
+  user-select: text;
+}

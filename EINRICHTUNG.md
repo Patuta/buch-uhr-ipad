@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v22
+# Buch-Uhr iPad-PWA v23
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -275,3 +275,12 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - nur der mittlere Titelbereich der Trennlinie ist per Doppeltipp editierbar
 - rechte Leiste: deutliches Wischen nach links entfernt Textdatei oder Trennlinie aus dem Stehsatz
 - linke Leiste: deutliches Wischen nach rechts löscht die Datei aus OneDrive und aus dem Projekt
+
+
+## Änderung in v23
+
+- Safari-Seitenzoom vollständig deaktiviert
+- Doppeltipp im Vorschautext kann die gesamte Seite nicht mehr vergrößern
+- Vorschau-Doppeltipp wird über eigene Touch-Ereignisse verarbeitet
+- Cursorposition wird weiterhin aus der angetippten Textstelle ermittelt
+- eigener Pinch-Zoom des Canvas bleibt erhalten
