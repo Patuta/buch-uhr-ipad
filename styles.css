@@ -176,3 +176,9 @@ body.sidebars-hidden .canvas-wrap {
   color: #ffcc4d;
   font-weight: 700;
 }
+
+
+/* v11: Browserzoom wird auf dem Canvas durch Uhrzoom ersetzt. */
+.clock-canvas {
+  overscroll-behavior: contain;
+}

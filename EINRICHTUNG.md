@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v10
+# Buch-Uhr iPad-PWA v11
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -167,3 +167,12 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - `Tab` besitzt nur noch einen einzigen Handler im Capture-Modus
 - `Tab` blendet ausschließlich beide Seitenleisten aus
 - Canvas und Uhr bleiben sichtbar und werden nach dem Umschalten neu berechnet
+
+
+## Änderung in v11
+
+- `Strg` + Mausrad zoomt nur die Uhr
+- Doppelklick auf das Uhrraster öffnet den Rastertitel-Dialog
+- Doppelklick auf eine Datei öffnet den internen Dateieditor
+- Datei-Doppelklicks werden nicht mehr an den Rastertitel weitergegeben
+- OneDrive öffnet nur noch über den entsprechenden Button im Editor

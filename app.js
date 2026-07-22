@@ -399,6 +399,7 @@ function makeFileRow(item) {
 
   row.addEventListener("dblclick", async event => {
     event.preventDefault();
+    event.stopPropagation();
     const doc = matchingDoc();
     if (doc) {
       selectDoc(doc);
@@ -606,8 +607,14 @@ function renderDocuments() {
     });
     g.addEventListener("click", event => {
       selectDoc(doc);
-      if (!state.dragging?.moved) openDocumentEditor(doc);
       event.stopPropagation();
+    });
+
+    g.addEventListener("dblclick", async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectDoc(doc);
+      await openDocumentEditor(doc);
     });
     el.documentLayer.append(g);
   }
@@ -629,11 +636,25 @@ function beginDocDrag(event, doc, node) {
   el.clockCanvas.setPointerCapture(event.pointerId);
 }
 
+
+el.clockCanvas.addEventListener("wheel", event => {
+  if (!event.ctrlKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const factor = event.deltaY < 0 ? 1.10 : 0.90;
+  zoomBy(factor);
+}, { passive: false });
+
 el.clockCanvas.addEventListener("contextmenu", event => {
   event.preventDefault();
   showContextMenu(event.clientX, event.clientY);
 });
-el.clockCanvas.addEventListener("dblclick", event => editRasterTitle(secondFromSvgEvent(event)));
+el.clockCanvas.addEventListener("dblclick", event => {
+  const docNode = event.target.closest?.(".doc-node");
+  if (docNode) return;
+  event.preventDefault();
+  editRasterTitle(secondFromSvgEvent(event));
+});
 
 el.clockCanvas.addEventListener("pointermove", event => {
   const drag = state.dragging;
@@ -689,6 +710,7 @@ function renderReferenceList() {
 
       row.addEventListener("dblclick", async event => {
         event.preventDefault();
+        event.stopPropagation();
         state.selectedReferencePath = raw;
         try {
           await openReferenceEditor(raw);
