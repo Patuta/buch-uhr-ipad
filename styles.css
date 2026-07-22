@@ -245,3 +245,30 @@ body.sidebars-hidden .canvas-wrap {
   max-height: 100%;
   padding: 3px 6px;
 }
+
+
+/* v18: vollständig getrennte Canvas-Trefferflächen */
+.doc-hit-area {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.canvas-file-target,
+.canvas-file-target * {
+  pointer-events: all;
+}
+.canvas-file-target {
+  cursor: pointer;
+  touch-action: none;
+}
+.canvas-file-target.dragging {
+  cursor: grabbing;
+}
+.progress-arc {
+  pointer-events: stroke;
+  cursor: grab;
+}
+.raster-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}

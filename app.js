@@ -36,6 +36,8 @@ const state = {
   lastDocTap: { id: null, time: 0 },
   lastDocClick: { id: null, time: 0 },
   suppressClickUntil: 0,
+  pointerAction: null,
+  lastCanvasFileActivation: { id: null, time: 0 },
 };
 
 
@@ -502,15 +504,22 @@ function renderProgress() {
   for (const doc of state.project.documents.filter(d => d.is_on_clock !== false)) {
     const path = svg("path", {
       d: arcPath(Number(doc.start_second || 0), progressSpan(doc)),
-      class: "progress-arc",
+      class: "progress-arc canvas-file-target",
       stroke: color,
       "data-doc-id": doc.id,
     });
-    path.addEventListener("pointerdown", event => beginDocDrag(event, doc, path));
-    path.addEventListener("click", event => {
-      if (!state.dragging?.moved) openDocumentEditor(doc);
-      event.stopPropagation();
+
+    path.addEventListener("pointerdown", event => {
+      beginCanvasFilePointer(event, doc, path, "progress");
     });
+
+    path.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectDoc(doc);
+      showContextMenu(event.clientX, event.clientY, doc);
+    });
+
     el.progressLayer.append(path);
   }
 }
@@ -588,120 +597,178 @@ function renderRasterTitles() {
 function renderDocuments() {
   el.documentLayer.replaceChildren();
   if (!state.project) return;
-  const color = state.project.clock_color || "#f4f4f4";
 
   for (const doc of state.project.documents.filter(d => d.is_on_clock !== false)) {
     const p = polar(Number(doc.start_second || 0), 520);
     const right = Math.cos(p.angle) >= 0;
+    const boxWidth = 230;
+    const boxHeight = 58;
+    const boxX = right ? 30 : -30 - boxWidth;
+
     const g = svg("g", {
-      class: `doc-node ${doc.id === state.selectedDocId ? "selected" : ""}`,
+      class: `doc-node canvas-file-target ${doc.id === state.selectedDocId ? "selected" : ""}`,
       "data-doc-id": doc.id,
       transform: `translate(${p.x} ${p.y})`,
-      "data-doc-id": doc.id
     });
 
-    const icon = svg("g", { class: `doc-icon ${doc.suffix === ".docx" ? "word" : doc.suffix === ".md" ? "md" : ""}` });
+    // Unsichtbare, zusammenhängende Trefferfläche für Symbol und Titel.
+    const hitX = right ? -25 : boxX - 5;
+    const hitWidth = boxWidth + 60;
+    g.append(svg("rect", {
+      x: hitX,
+      y: -36,
+      width: hitWidth,
+      height: 72,
+      rx: 8,
+      class: "doc-hit-area",
+    }));
+
+    const icon = svg("g", {
+      class: `doc-icon ${doc.suffix === ".docx" ? "word" : doc.suffix === ".md" ? "md" : ""}`,
+    });
     icon.append(svg("rect", { x: -19, y: -19, width: 38, height: 38, rx: 4 }));
     const label = doc.suffix === ".docx" ? "W" : doc.suffix === ".md" ? "MD" : "≡";
     icon.append(svg("text", { x: 0, y: 1 }, label));
     g.append(icon);
 
-    const titleText = doc.title || stem(basenameAny(doc.project_path));
-    const boxWidth = 230;
-    const boxHeight = 58;
-    const boxX = right ? 30 : -30 - boxWidth;
     const foreign = svg("foreignObject", {
       x: boxX,
       y: -boxHeight / 2,
       width: boxWidth,
       height: boxHeight,
-      class: "doc-title-box"
+      class: "doc-title-box",
     });
     const div = document.createElement("div");
     div.className = `doc-title-html ${right ? "right" : "left"}`;
-    div.textContent = titleText;
+    div.textContent = doc.title || stem(basenameAny(doc.project_path));
     foreign.append(div);
     g.append(foreign);
 
     g.addEventListener("pointerdown", event => {
-      selectDoc(doc);
-      beginDocDrag(event, doc, g);
-      const hold = setTimeout(() => {
-        if (state.dragging && !state.dragging.moved) showContextMenu(event.clientX, event.clientY, doc);
-      }, 650);
-      g.addEventListener("pointerup", () => clearTimeout(hold), {once:true});
-      g.addEventListener("pointercancel", () => clearTimeout(hold), {once:true});
+      beginCanvasFilePointer(event, doc, g, "document");
     });
+
     g.addEventListener("contextmenu", event => {
       event.preventDefault();
+      event.stopPropagation();
+      selectDoc(doc);
       showContextMenu(event.clientX, event.clientY, doc);
     });
-    g.addEventListener("click", async event => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
 
-      if (Date.now() < state.suppressClickUntil) return;
-
-      selectDoc(doc);
-
-      const now = Date.now();
-      const sameDocument = state.lastDocClick.id === doc.id;
-      const withinWindow = now - state.lastDocClick.time <= 430;
-
-      if (sameDocument && withinWindow) {
-        state.lastDocClick = { id: null, time: 0 };
-        await openDocumentEditor(doc);
-      } else {
-        state.lastDocClick = { id: doc.id, time: now };
-      }
-    });
     el.documentLayer.append(g);
   }
 }
 
-function beginDocDrag(event, doc, node) {
-  event.preventDefault();
-  event.stopPropagation();
-  pushHistory();
-  state.dragging = {
-    pointerId: event.pointerId,
-    doc,
-    node,
-    moved: false,
-    startX: event.clientX,
-    startY: event.clientY,
-    originalSecond: Number(doc.start_second || 0),
-  };
-  node.classList.add("dragging");
-  el.clockCanvas.setPointerCapture(event.pointerId);
+function pointerSecondFromClient(clientX, clientY) {
+  const point = el.clockCanvas.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
+
+  // View transform rückwärts berücksichtigen.
+  const x = (local.x - state.viewPanX) / state.viewZoom;
+  const y = (local.y - state.viewPanY) / state.viewZoom;
+  let angle = Math.atan2(y, x) + Math.PI / 2;
+  if (angle < 0) angle += Math.PI * 2;
+  return angle / (Math.PI * 2) * 3600;
 }
 
+function signedSecondDelta(current, initial) {
+  let delta = current - initial;
+  while (delta > 1800) delta -= 3600;
+  while (delta < -1800) delta += 3600;
+  return delta;
+}
 
-document.addEventListener("dblclick", async event => {
-  const path = event.composedPath();
-  const docNode = path.find(node => node?.classList?.contains?.("doc-node"));
-  if (docNode) {
-    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-    const doc = state.project?.documents?.find(entry => entry.id === docNode.dataset.docId);
-    if (doc) { selectDoc(doc); await openDocumentEditor(doc); }
-    return;
-  }
-  const fileRow = path.find(node => node?.classList?.contains?.("file-row"));
-  if (fileRow) {
-    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-    const item = state.folderItems.find(entry => entry.id === fileRow.dataset.fileItemId);
-    const doc = item ? findDocByName(item.name) : null;
-    if (doc) { state.selectedFileId=item.id; state.selectedReferencePath=null; state.selectedDocId=doc.id; updateSelectionVisuals(); await openDocumentEditor(doc); }
-    return;
-  }
-  const referenceRow = path.find(node => node?.classList?.contains?.("reference-row"));
-  if (referenceRow?.dataset.referencePath) {
-    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-    state.selectedReferencePath=referenceRow.dataset.referencePath; state.selectedFileId=null; state.selectedDocId=null; updateSelectionVisuals(); await openReferenceEditor(state.selectedReferencePath);
-  }
-}, true);
+function clearPointerAction() {
+  const action = state.pointerAction;
+  if (!action) return null;
 
+  clearTimeout(action.touchHoldTimer);
+  action.node?.classList.remove("dragging");
+
+  try {
+    if (action.captureSet && el.clockCanvas.hasPointerCapture(action.pointerId)) {
+      el.clockCanvas.releasePointerCapture(action.pointerId);
+    }
+  } catch {}
+
+  state.pointerAction = null;
+  return action;
+}
+
+function beginCanvasFilePointer(event, doc, node, source) {
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  selectDoc(doc);
+
+  const initialPointerSecond = pointerSecondFromClient(event.clientX, event.clientY);
+  const action = {
+    kind: "file",
+    source,
+    pointerId: event.pointerId,
+    pointerType: event.pointerType,
+    doc,
+    node,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    initialPointerSecond,
+    originalSecond: Number(doc.start_second || 0),
+    moved: false,
+    captureSet: false,
+    historyPushed: false,
+    touchHoldTimer: null,
+  };
+
+  // Langdruck gibt es nur auf Touch, nie mit der Maus.
+  if (event.pointerType === "touch") {
+    action.touchHoldTimer = setTimeout(() => {
+      if (state.pointerAction === action && !action.moved) {
+        clearPointerAction();
+        showContextMenu(event.clientX, event.clientY, doc);
+      }
+    }, 650);
+  }
+
+  state.pointerAction = action;
+}
+
+function beginCanvasPan(event) {
+  if (event.button !== 0 && event.pointerType !== "touch") return;
+
+  const point = el.clockCanvas.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
+
+  state.pointerAction = {
+    kind: "pan",
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    lastX: local.x,
+    lastY: local.y,
+    moved: false,
+    captureSet: false,
+  };
+}
+
+async function activateCanvasFile(doc) {
+  const now = Date.now();
+  const previous = state.lastCanvasFileActivation;
+  const isSecondClick = previous.id === doc.id && now - previous.time <= 430;
+
+  if (isSecondClick) {
+    state.lastCanvasFileActivation = { id: null, time: 0 };
+    await openDocumentEditor(doc);
+  } else {
+    state.lastCanvasFileActivation = { id: doc.id, time: now };
+  }
+}
+
+// Rastertitel: ausschließlich direkter Doppelklick auf einen Rasterstrich.
 el.clockLayer.addEventListener("dblclick", event => {
   const tick = event.composedPath().find(
     node => node?.classList?.contains?.("raster-hit")
@@ -711,16 +778,15 @@ el.clockLayer.addEventListener("dblclick", event => {
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
-
   editRasterTitle(Number(tick.dataset.second || 0));
 }, true);
 
+// Doppelklick auf freien Canvas oder auf Dateien erzeugt niemals Rastertitel.
 el.clockCanvas.addEventListener("dblclick", event => {
   const onTick = event.composedPath().some(
     node => node?.classList?.contains?.("raster-hit")
   );
   if (onTick) return;
-
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
@@ -730,120 +796,134 @@ el.clockCanvas.addEventListener("wheel", event => {
   if (!event.ctrlKey) return;
   event.preventDefault();
   event.stopPropagation();
-  const factor = event.deltaY < 0 ? 1.10 : 0.90;
-  zoomBy(factor);
+  zoomBy(event.deltaY < 0 ? 1.10 : 0.90);
 }, { passive: false });
 
 el.clockCanvas.addEventListener("contextmenu", event => {
+  const onFile = event.composedPath().some(
+    node => node?.classList?.contains?.("canvas-file-target")
+  );
+  if (onFile) return;
   event.preventDefault();
   showContextMenu(event.clientX, event.clientY);
 });
+
 el.clockCanvas.addEventListener("pointerdown", event => {
   const path = event.composedPath();
-  const onDocument = path.some(node => node?.classList?.contains?.("doc-node"));
-  const onProgress = path.some(node => node?.classList?.contains?.("progress-arc"));
-  if (onDocument || onProgress || event.button === 2) return;
-
-  const point = el.clockCanvas.createSVGPoint();
-  point.x = event.clientX;
-  point.y = event.clientY;
-  const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
-
-  state.panning = {
-    pointerId: event.pointerId,
-    startClientX: event.clientX,
-    startClientY: event.clientY,
-    lastX: local.x,
-    lastY: local.y,
-    moved: false,
-  };
-  el.clockCanvas.setPointerCapture(event.pointerId);
+  const onFile = path.some(node => node?.classList?.contains?.("canvas-file-target"));
+  const onTick = path.some(node => node?.classList?.contains?.("raster-hit"));
+  if (onFile || onTick || event.button === 2) return;
+  beginCanvasPan(event);
 });
 
-el.clockCanvas.addEventListener("pointermove", event => {
-  if (state.dragging && event.buttons === 0) {
-    endDocumentDrag(state.dragging.pointerId);
+window.addEventListener("pointermove", event => {
+  const action = state.pointerAction;
+  if (!action || action.pointerId !== event.pointerId) return;
+
+  // Nach Loslassen darf kein Zustand weiterlaufen.
+  if (event.pointerType !== "touch" && event.buttons === 0) {
+    clearPointerAction();
+    return;
   }
 
-  const drag = state.dragging;
-  if (drag && drag.pointerId === event.pointerId && event.buttons !== 0) {
-    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
-    if (!drag.moved && distance <= 10) return;
-    if (!drag.moved) drag.moved = true;
-    const raw = secondFromSvgEvent(event);
-    drag.doc.start_second = magneticSecond(raw);
+  const distance = Math.hypot(
+    event.clientX - action.startClientX,
+    event.clientY - action.startClientY
+  );
+
+  if (action.kind === "file") {
+    if (!action.moved && distance <= 10) return;
+
+    if (!action.moved) {
+      action.moved = true;
+      clearTimeout(action.touchHoldTimer);
+      action.node?.classList.add("dragging");
+
+      if (!action.historyPushed) {
+        pushHistory();
+        action.historyPushed = true;
+      }
+
+      try {
+        el.clockCanvas.setPointerCapture(action.pointerId);
+        action.captureSet = true;
+      } catch {}
+    }
+
+    const currentPointerSecond = pointerSecondFromClient(event.clientX, event.clientY);
+    const delta = signedSecondDelta(currentPointerSecond, action.initialPointerSecond);
+    action.doc.start_second = magneticSecond(action.originalSecond + delta);
+
     renderProgress();
     renderDocuments();
     return;
   }
 
-  const pan = state.panning;
-  if (!pan || pan.pointerId !== event.pointerId) return;
+  if (action.kind === "pan") {
+    if (!action.moved && distance <= 4) return;
 
-  if (Math.hypot(event.clientX - pan.startClientX, event.clientY - pan.startClientY) > 4) {
-    pan.moved = true;
-  }
-
-  const point = el.clockCanvas.createSVGPoint();
-  point.x = event.clientX;
-  point.y = event.clientY;
-  const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
-
-  state.viewPanX += local.x - pan.lastX;
-  state.viewPanY += local.y - pan.lastY;
-  pan.lastX = local.x;
-  pan.lastY = local.y;
-  applyViewZoom();
-});
-
-el.clockCanvas.addEventListener("pointerup", async event => {
-  const drag = state.dragging;
-  if (drag && drag.pointerId === event.pointerId) {
-    const moved = Boolean(drag.moved);
-    const doc = drag.doc;
-    const originalSecond = drag.originalSecond;
-
-    endDocumentDrag(event.pointerId);
-
-    if (moved) {
-      state.suppressClickUntil = Date.now() + 250;
-      await saveProject().catch(error => toast(error.message, 6000));
-    } else {
-      doc.start_second = originalSecond;
+    if (!action.moved) {
+      action.moved = true;
+      try {
+        el.clockCanvas.setPointerCapture(action.pointerId);
+        action.captureSet = true;
+      } catch {}
     }
 
+    const point = el.clockCanvas.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
+
+    state.viewPanX += local.x - action.lastX;
+    state.viewPanY += local.y - action.lastY;
+    action.lastX = local.x;
+    action.lastY = local.y;
+    applyViewZoom();
+  }
+}, true);
+
+window.addEventListener("pointerup", async event => {
+  const action = state.pointerAction;
+  if (!action || action.pointerId !== event.pointerId) return;
+
+  const finished = clearPointerAction();
+  if (!finished) return;
+
+  if (finished.kind === "file") {
+    if (finished.moved) {
+      await saveProject().catch(error => toast(error.message, 6000));
+    } else {
+      finished.doc.start_second = finished.originalSecond;
+      await activateCanvasFile(finished.doc);
+    }
     return;
   }
 
-  const pan = state.panning;
-  if (pan && pan.pointerId === event.pointerId) {
-    try {
-      if (el.clockCanvas.hasPointerCapture(event.pointerId)) {
-        el.clockCanvas.releasePointerCapture(event.pointerId);
-      }
-    } catch {}
-    state.panning = null;
+  if (finished.kind === "pan") {
     applyViewZoom();
   }
-});
+}, true);
 
-el.clockCanvas.addEventListener("pointercancel", event => {
-  endDocumentDrag(event.pointerId);
-  if (state.panning?.pointerId === event.pointerId) state.panning = null;
-});
+window.addEventListener("pointercancel", event => {
+  const action = state.pointerAction;
+  if (!action || action.pointerId !== event.pointerId) return;
 
-el.clockCanvas.addEventListener("lostpointercapture", event => {
-  endDocumentDrag(event.pointerId);
-  if (state.panning?.pointerId === event.pointerId) state.panning = null;
-});
-
-window.addEventListener("pointerup", event => {
-  endDocumentDrag(event.pointerId);
+  const cancelled = clearPointerAction();
+  if (cancelled?.kind === "file" && cancelled.moved) {
+    cancelled.doc.start_second = cancelled.originalSecond;
+    renderProgress();
+    renderDocuments();
+  }
 }, true);
 
 window.addEventListener("blur", () => {
-  endDocumentDrag();
-  state.panning = null;
+  const action = clearPointerAction();
+  if (action?.kind === "file" && action.moved) {
+    action.doc.start_second = action.originalSecond;
+    renderProgress();
+    renderDocuments();
+  }
 });
 
 

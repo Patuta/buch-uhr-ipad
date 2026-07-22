@@ -1,4 +1,4 @@
-const CACHE = "buch-uhr-ipad-v17";
+const CACHE = "buch-uhr-ipad-v18";
 const SHELL = [
   "./",
   "./index.html",

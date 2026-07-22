@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v17
+# Buch-Uhr iPad-PWA v18
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -229,3 +229,17 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Ziehen wird bei `pointerup`, `pointercancel`, verlorenem Pointer-Capture und Fensterfokusverlust sicher beendet
 - sobald keine Maustaste mehr gedrückt ist, wird ein eventuell verbliebener Drag-Zustand verworfen
 - nach einem echten Ziehen wird der nachfolgende Klick kurz unterdrückt
+
+
+## Änderung in v18
+
+- Canvas-Ereignisse vollständig neu aufgebaut
+- Dateisymbol und Dateititel besitzen eine gemeinsame unsichtbare Trefferfläche
+- zwei Klicks beziehungsweise zweimaliges Antippen öffnen den internen Editor
+- Ziehen beginnt erst nach klarer Bewegung
+- Pointer-Capture wird erst beim tatsächlichen Ziehen gesetzt
+- beim Loslassen, Abbruch oder Fokusverlust endet das Ziehen sicher
+- beim Ziehen bleibt der ursprüngliche Winkelabstand zum Mauszeiger erhalten; Datei und Fortschrittsbogen springen nicht weg
+- Kontextmenü mit der Maus nur per Rechtsklick
+- Langdruck-Kontextmenü ausschließlich auf Touch
+- Rasterdialog ausschließlich per Doppelklick auf einen Rasterstrich
