@@ -966,6 +966,7 @@ function renderAll() {
   renderDocuments();
   renderReferenceList();
   updateHistoryButtons();
+  applyViewZoom();
 }
 
 async function getDocumentContent(doc) {
@@ -1042,7 +1043,7 @@ async function openExternal() {
 }
 
 function applySidebarState() {
-  applySidebarState();
+  el.appLayout.classList.toggle("sidebars-visible", state.sidebarsVisible);
   el.appLayout.classList.toggle("sidebars-hidden", !state.sidebarsVisible);
 }
 
@@ -1118,12 +1119,6 @@ window.addEventListener("keydown", event => {
 }, true);
 
 document.addEventListener("keydown", event => {
-  if (event.key === "Tab" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    toggleSidebars();
-    return;
-  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
     event.preventDefault();
     undo();
@@ -1142,9 +1137,10 @@ document.addEventListener("keydown", event => {
   }
 });
 
-el.appLayout.classList.toggle("sidebars-visible", state.sidebarsVisible);
+applySidebarState();
 updateHistoryButtons();
 renderClock();
+applyViewZoom();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("./sw.js").catch(console.error);

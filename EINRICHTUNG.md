@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v8
+# Buch-Uhr iPad-PWA v9
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -148,3 +148,12 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Zoom verändert nur die Uhr, nicht die Seitenleisten
 - Dokumenttitel stehen weiter außerhalb der Uhr und sind kleiner
 - `Tab` wird im Capture-Modus abgefangen und blendet nur die Seitenleisten aus
+
+
+## Änderung in v9
+
+- Endlosschleife in `applySidebarState()` behoben
+- Uhr und Canvas werden wieder zuverlässig gerendert
+- gespeicherter Zoom wird nach jedem Rendern angewendet
+- doppelte Tab-Erkennung entfernt
+- Seitenleistenstatus wird beim Start korrekt gesetzt
