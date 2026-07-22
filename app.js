@@ -25,6 +25,7 @@ const state = {
   sidebarsVisible: localStorage.getItem("buchuhr.sidebars") !== "false",
   dragging: null,
   selectedDocId: null,
+  selectedFileId: null,
   actionMode: "",
   actionMinute: 0,
   viewZoom: Number(localStorage.getItem("buchuhr.viewZoom") || 1),
@@ -63,7 +64,7 @@ const el = Object.fromEntries([
   "saveSettingsBtn", "clockCanvas", "clockLayer", "progressLayer", "rasterTitleLayer",
   "documentLayer", "referenceList", "fileList", "refreshFilesBtn", "emptyHint",
   "newTextBtn", "renameBtn", "deleteBtn", "zoomOutBtn", "zoomInBtn", "fitBtn", "undoBtn", "redoBtn", "editorDialog", "editorTitle", "editorText", "editorMeta",
-  "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast", "contextMenu", "actionDialog", "actionDialogTitle", "actionDialogLabel", "actionDialogInput", "actionDialogText", "actionDialogSaveBtn", "actionColorFields", "backgroundColorInput", "clockColorInput", "progressColorInput"
+  "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast", "contextMenu", "actionDialog", "actionDialogTitle", "actionDialogLabel", "actionDialogInput", "actionDialogText", "newTextTitleLabel", "newTextTitleInput", "actionDialogSaveBtn", "actionColorFields", "backgroundColorInput", "clockColorInput", "progressColorInput"
 ].map(id => [id, document.getElementById(id)]));
 
 function toast(message, timeout = 2800) {
@@ -373,13 +374,42 @@ function fileIconClass(name) {
   return ["≡", "text"];
 }
 
-function makeFileRow(item, click) {
+function makeFileRow(item) {
   const row = document.createElement("div");
-  row.className = "file-row";
+  row.className = `file-row ${item.id === state.selectedFileId ? "selected" : ""}`;
   const [label, cls] = fileIconClass(item.name);
   row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
   row.querySelector(".file-name").textContent = item.folder ? item.name : stem(item.name);
-  row.addEventListener("click", click);
+
+  const matchingDoc = () => state.project?.documents?.find(
+    doc => basenameAny(doc.project_path).toLocaleLowerCase("de") === item.name.toLocaleLowerCase("de")
+  ) || null;
+
+  row.addEventListener("click", event => {
+    event.preventDefault();
+    state.selectedFileId = item.id || null;
+    const doc = matchingDoc();
+    state.selectedDocId = doc?.id || null;
+    renderFileList();
+    renderDocuments();
+    el.renameBtn.disabled = !doc;
+    el.deleteBtn.disabled = !doc;
+  });
+
+  row.addEventListener("dblclick", () => {
+    if (item.webUrl) window.open(item.webUrl, "_blank", "noopener");
+  });
+
+  row.addEventListener("contextmenu", event => {
+    event.preventDefault();
+    state.selectedFileId = item.id || null;
+    const doc = matchingDoc();
+    state.selectedDocId = doc?.id || null;
+    renderFileList();
+    renderDocuments();
+    showContextMenu(event.clientX, event.clientY, doc);
+  });
+
   return row;
 }
 
@@ -390,9 +420,7 @@ function renderFileList() {
     .sort((a, b) => Number(Boolean(b.folder)) - Number(Boolean(a.folder)) || a.name.localeCompare(b.name, "de"));
 
   for (const item of items) {
-    el.fileList.append(makeFileRow(item, () => {
-      if (item.webUrl) window.open(item.webUrl, "_blank", "noopener");
-    }));
+    el.fileList.append(makeFileRow(item));
   }
 }
 
@@ -703,6 +731,8 @@ function openActionDialog(mode, title, value = "") {
   el.actionDialogText.value = "";
   el.actionDialogInput.type = mode === "norm" ? "number" : "text";
   el.actionDialogInput.classList.toggle("hidden", mode === "newText" || mode === "colors");
+  el.newTextTitleLabel.classList.toggle("hidden", mode !== "newText");
+  el.newTextTitleInput.value = "";
   el.actionDialogText.classList.toggle("hidden", mode !== "newText");
   el.actionColorFields.classList.toggle("hidden", mode !== "colors");
   if (mode === "colors") {
@@ -768,7 +798,8 @@ async function saveActionDialog() {
   } else if (state.actionMode === "newText") {
     const text = el.actionDialogText.value.replace(/\r\n?/g, "\n").trim();
     if (!text) return toast("Bitte Text eingeben.");
-    const title = (text.split(/\n/)[0].trim() || "Neue Textdatei").slice(0, 80);
+    const typedTitle = el.newTextTitleInput.value.trim();
+    const title = (typedTitle || text.split(/\n/)[0].trim() || "Neue Textdatei").slice(0, 80);
     const safe = title.replace(/[<>:"/\\|?*]/g, "_");
     const filename = `00_00 – ${safe}.txt`;
     await uploadByPath(`${FILES_DIR}/${filename}`, text + "\n", "text/plain; charset=utf-8");
@@ -869,10 +900,15 @@ async function openExternal() {
   }
 }
 
+function applySidebarState() {
+  applySidebarState();
+  el.appLayout.classList.toggle("sidebars-hidden", !state.sidebarsVisible);
+}
+
 function toggleSidebars() {
   state.sidebarsVisible = !state.sidebarsVisible;
   localStorage.setItem("buchuhr.sidebars", String(state.sidebarsVisible));
-  el.appLayout.classList.toggle("sidebars-visible", state.sidebarsVisible);
+  applySidebarState();
 }
 
 function openSettings() {
@@ -934,7 +970,9 @@ el.openExternalBtn.addEventListener("click", openExternal);
 document.addEventListener("keydown", event => {
   if (event.key === "Tab" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
     event.preventDefault();
+    event.stopPropagation();
     toggleSidebars();
+    return;
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
     event.preventDefault();

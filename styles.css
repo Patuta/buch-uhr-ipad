@@ -113,3 +113,8 @@ dialog input, dialog textarea { width: 100%; background: #101218; color: var(--t
 #actionColorFields input[type=color]{width:80px;height:42px;padding:2px}
 .doc-node.selected .doc-icon rect{stroke:#ffcc4d;stroke-width:4}
 .doc-node.selected .doc-title{fill:#ffcc4d;font-weight:700}
+
+.file-row.selected { background:#315ea7; outline:1px solid #6ea0ff; }
+.layout.sidebars-hidden { grid-template-columns:0 minmax(0,1fr) 0 !important; }
+.layout.sidebars-hidden .sidebar { visibility:hidden !important; width:0 !important; min-width:0 !important; overflow:hidden !important; border:0 !important; }
+.layout.sidebars-hidden .canvas-wrap { display:block !important; visibility:visible !important; min-width:0 !important; min-height:0 !important; }

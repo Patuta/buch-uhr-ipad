@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v6
+# Buch-Uhr iPad-PWA v7
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -127,3 +127,13 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - langes Antippen oder Rechtsklick: Kontextmenü
 - Rastertitel per Doppelklick oder Kontextmenü
 - Normseiten und Farben im Kontextmenü
+
+
+## Änderung in v7
+
+- neue Textdatei besitzt ein eigenes Titelfeld
+- einfacher Klick in der linken Dateiliste wählt nur aus
+- Doppelklick öffnet die Datei in OneDrive
+- `F2` wirkt auf die links ausgewählte Projektdatei
+- Rechtsklick links öffnet das Kontextmenü
+- `Tab` blendet nur die beiden Seitenleisten aus; die Uhr bleibt sichtbar
