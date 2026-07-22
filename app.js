@@ -34,6 +34,8 @@ const state = {
   viewPanY: Number(localStorage.getItem("buchuhr.viewPanY") || 0),
   panning: null,
   lastDocTap: { id: null, time: 0 },
+  lastDocClick: { id: null, time: 0 },
+  suppressClickUntil: 0,
 };
 
 
@@ -634,18 +636,25 @@ function renderDocuments() {
       event.preventDefault();
       showContextMenu(event.clientX, event.clientY, doc);
     });
-    g.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      selectDoc(doc);
-    });
-
-    g.addEventListener("dblclick", async event => {
+    g.addEventListener("click", async event => {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+
+      if (Date.now() < state.suppressClickUntil) return;
+
       selectDoc(doc);
-      await openDocumentEditor(doc);
+
+      const now = Date.now();
+      const sameDocument = state.lastDocClick.id === doc.id;
+      const withinWindow = now - state.lastDocClick.time <= 430;
+
+      if (sameDocument && withinWindow) {
+        state.lastDocClick = { id: null, time: 0 };
+        await openDocumentEditor(doc);
+      } else {
+        state.lastDocClick = { id: doc.id, time: now };
+      }
     });
     el.documentLayer.append(g);
   }
@@ -717,16 +726,6 @@ el.clockCanvas.addEventListener("dblclick", event => {
   event.stopImmediatePropagation();
 }, true);
 
-el.documentLayer.addEventListener("dblclick", async event => {
-  const node = eventDocumentNode(event);
-  if (!node) return;
-  event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-  const doc = state.project?.documents?.find(entry => entry.id === node.dataset.docId);
-  if (!doc) return;
-  selectDoc(doc);
-  await openDocumentEditor(doc);
-}, true);
-
 el.clockCanvas.addEventListener("wheel", event => {
   if (!event.ctrlKey) return;
   event.preventDefault();
@@ -762,8 +761,12 @@ el.clockCanvas.addEventListener("pointerdown", event => {
 });
 
 el.clockCanvas.addEventListener("pointermove", event => {
+  if (state.dragging && event.buttons === 0) {
+    endDocumentDrag(state.dragging.pointerId);
+  }
+
   const drag = state.dragging;
-  if (drag && drag.pointerId === event.pointerId) {
+  if (drag && drag.pointerId === event.pointerId && event.buttons !== 0) {
     const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
     if (!drag.moved && distance <= 10) return;
     if (!drag.moved) drag.moved = true;
@@ -796,47 +799,51 @@ el.clockCanvas.addEventListener("pointermove", event => {
 el.clockCanvas.addEventListener("pointerup", async event => {
   const drag = state.dragging;
   if (drag && drag.pointerId === event.pointerId) {
-    state.dragging = { ...drag };
-    drag.node?.classList.remove("dragging");
-    if (el.clockCanvas.hasPointerCapture(event.pointerId)) {
-      el.clockCanvas.releasePointerCapture(event.pointerId);
-    }
+    const moved = Boolean(drag.moved);
+    const doc = drag.doc;
+    const originalSecond = drag.originalSecond;
 
-    if (drag.moved) {
+    endDocumentDrag(event.pointerId);
+
+    if (moved) {
+      state.suppressClickUntil = Date.now() + 250;
       await saveProject().catch(error => toast(error.message, 6000));
     } else {
-      // Reiner Klick: Position und vorhandenes DOM-Element bleiben unverändert.
-      // So kann der Browser den zweiten Klick als echten Doppelklick erkennen.
-      drag.doc.start_second = drag.originalSecond;
+      doc.start_second = originalSecond;
     }
 
-    if (!drag.moved && event.pointerType === "touch") {
-      const now = Date.now();
-      if (state.lastDocTap.id === drag.doc.id && now - state.lastDocTap.time < 430) {
-        state.lastDocTap = { id: null, time: 0 };
-        await openDocumentEditor(drag.doc);
-      } else {
-        state.lastDocTap = { id: drag.doc.id, time: now };
-      }
-    }
-
-    setTimeout(() => { state.dragging = null; }, 0);
     return;
   }
 
   const pan = state.panning;
   if (pan && pan.pointerId === event.pointerId) {
-    if (el.clockCanvas.hasPointerCapture(event.pointerId)) {
-      el.clockCanvas.releasePointerCapture(event.pointerId);
-    }
+    try {
+      if (el.clockCanvas.hasPointerCapture(event.pointerId)) {
+        el.clockCanvas.releasePointerCapture(event.pointerId);
+      }
+    } catch {}
     state.panning = null;
     applyViewZoom();
   }
 });
 
 el.clockCanvas.addEventListener("pointercancel", event => {
-  if (state.dragging?.pointerId === event.pointerId) state.dragging = null;
+  endDocumentDrag(event.pointerId);
   if (state.panning?.pointerId === event.pointerId) state.panning = null;
+});
+
+el.clockCanvas.addEventListener("lostpointercapture", event => {
+  endDocumentDrag(event.pointerId);
+  if (state.panning?.pointerId === event.pointerId) state.panning = null;
+});
+
+window.addEventListener("pointerup", event => {
+  endDocumentDrag(event.pointerId);
+}, true);
+
+window.addEventListener("blur", () => {
+  endDocumentDrag();
+  state.panning = null;
 });
 
 
@@ -1009,6 +1016,26 @@ function updateSelectionVisuals() {
   const hasDoc = Boolean(selectedDoc());
   el.renameBtn.disabled = !(hasDoc || state.selectedReferencePath);
   el.deleteBtn.disabled = !hasDoc;
+}
+
+
+function endDocumentDrag(pointerId = null) {
+  const drag = state.dragging;
+  if (!drag) return null;
+  if (pointerId !== null && drag.pointerId !== pointerId) return null;
+
+  try {
+    drag.node?.classList.remove("dragging");
+  } catch {}
+
+  try {
+    if (el.clockCanvas.hasPointerCapture?.(drag.pointerId)) {
+      el.clockCanvas.releasePointerCapture(drag.pointerId);
+    }
+  } catch {}
+
+  state.dragging = null;
+  return drag;
 }
 
 function selectedDoc() {

@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v16
+# Buch-Uhr iPad-PWA v17
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -219,3 +219,13 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Dateisymbole und Dateititel erhalten eigene Zeigerereignisse
 - 15- und 45-Minuten-Titel bleiben mit fester Innenkante vollständig innerhalb des Uhrkreises
 - Verbindungslinien enden vor dem Titelbereich
+
+
+## Änderung in v17
+
+- zwei Klicks auf dieselbe Uhrdatei innerhalb von 430 ms öffnen den Editor
+- native Browser-Doppelklick-Erkennung wird für Uhrdateien nicht mehr verwendet
+- dieselbe Öffnungsfunktion wie bei `Enter`
+- Ziehen wird bei `pointerup`, `pointercancel`, verlorenem Pointer-Capture und Fensterfokusverlust sicher beendet
+- sobald keine Maustaste mehr gedrückt ist, wird ein eventuell verbliebener Drag-Zustand verworfen
+- nach einem echten Ziehen wird der nachfolgende Klick kurz unterdrückt
