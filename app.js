@@ -38,6 +38,10 @@ const state = {
   suppressClickUntil: 0,
   pointerAction: null,
   lastCanvasFileActivation: { id: null, time: 0 },
+  lastRasterTap: { second: null, time: 0 },
+  lastSidebarBlankTap: { area: null, time: 0 },
+  pinch: null,
+  lastTouchEndTime: 0,
 };
 
 
@@ -680,6 +684,118 @@ function signedSecondDelta(current, initial) {
   return delta;
 }
 
+function localSvgPointFromClient(clientX, clientY) {
+  const point = el.clockCanvas.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  return point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
+}
+
+function contentPointFromClient(clientX, clientY) {
+  const local = localSvgPointFromClient(clientX, clientY);
+  return {
+    x: (local.x - state.viewPanX) / state.viewZoom,
+    y: (local.y - state.viewPanY) / state.viewZoom,
+    local,
+  };
+}
+
+function touchDistance(t1, t2) {
+  return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+}
+
+function touchMidpoint(t1, t2) {
+  return {
+    x: (t1.clientX + t2.clientX) / 2,
+    y: (t1.clientY + t2.clientY) / 2,
+  };
+}
+
+function clampZoom(value) {
+  return Math.max(.55, Math.min(2.2, value));
+}
+
+function beginCanvasPinch(touches) {
+  if (touches.length < 2) return;
+  clearPointerAction();
+  const [t1, t2] = touches;
+  const midpoint = touchMidpoint(t1, t2);
+  const content = contentPointFromClient(midpoint.x, midpoint.y);
+  state.pinch = {
+    distance: Math.max(1, touchDistance(t1, t2)),
+    startZoom: state.viewZoom,
+    startPanX: state.viewPanX,
+    startPanY: state.viewPanY,
+    anchorX: content.x,
+    anchorY: content.y,
+  };
+}
+
+function updateCanvasPinch(touches) {
+  const pinch = state.pinch;
+  if (!pinch || touches.length < 2) return;
+  const [t1, t2] = touches;
+  const midpoint = touchMidpoint(t1, t2);
+  const local = localSvgPointFromClient(midpoint.x, midpoint.y);
+  state.viewZoom = clampZoom(pinch.startZoom * (touchDistance(t1, t2) / pinch.distance));
+  state.viewPanX = local.x - pinch.anchorX * state.viewZoom;
+  state.viewPanY = local.y - pinch.anchorY * state.viewZoom;
+  applyViewZoom();
+}
+
+function endCanvasPinch() {
+  if (!state.pinch) return;
+  state.pinch = null;
+  applyViewZoom();
+}
+
+function isEditableTarget(target) {
+  return Boolean(target?.closest?.('input, textarea, select, button, [contenteditable="true"]'));
+}
+
+function rememberTouchEnd(event) {
+  const now = Date.now();
+  const target = event.target;
+  const inApp = Boolean(target?.closest?.('.topbar, .sidebar, .canvas-wrap, dialog'));
+  if (!inApp || isEditableTarget(target)) {
+    state.lastTouchEndTime = now;
+    return;
+  }
+  if (now - state.lastTouchEndTime < 360) event.preventDefault();
+  state.lastTouchEndTime = now;
+}
+
+function registerRasterTap(second) {
+  const now = Date.now();
+  const rounded = Math.round(Number(second || 0) / 60) * 60 % 3600;
+  const previous = state.lastRasterTap;
+  const isSecondTap = previous.second === rounded && now - previous.time <= 430;
+
+  if (isSecondTap) {
+    state.lastRasterTap = { second: null, time: 0 };
+    editRasterTitle(rounded);
+    return true;
+  }
+
+  state.lastRasterTap = { second: rounded, time: now };
+  return false;
+}
+
+function registerSidebarBlankTap(area) {
+  const now = Date.now();
+  const previous = state.lastSidebarBlankTap;
+  const isSecondTap = previous.area === area && now - previous.time <= 430;
+
+  if (isSecondTap) {
+    state.lastSidebarBlankTap = { area: null, time: 0 };
+    createNewText();
+    return true;
+  }
+
+  state.lastSidebarBlankTap = { area, time: now };
+  return false;
+}
+
 function clearPointerAction() {
   const action = state.pointerAction;
   if (!action) return null;
@@ -781,6 +897,17 @@ el.clockLayer.addEventListener("dblclick", event => {
   editRasterTitle(Number(tick.dataset.second || 0));
 }, true);
 
+el.clockLayer.addEventListener("pointerup", event => {
+  if (event.pointerType !== "touch") return;
+  const tick = event.composedPath().find(
+    node => node?.classList?.contains?.("raster-hit")
+  );
+  if (!tick) return;
+  event.preventDefault();
+  event.stopPropagation();
+  registerRasterTap(Number(tick.dataset.second || 0));
+}, true);
+
 // Doppelklick auf freien Canvas oder auf Dateien erzeugt niemals Rastertitel.
 el.clockCanvas.addEventListener("dblclick", event => {
   const onTick = event.composedPath().some(
@@ -791,6 +918,29 @@ el.clockCanvas.addEventListener("dblclick", event => {
   event.stopPropagation();
   event.stopImmediatePropagation();
 }, true);
+
+el.clockCanvas.addEventListener("touchstart", event => {
+  if (event.touches.length >= 2) {
+    event.preventDefault();
+    beginCanvasPinch(event.touches);
+  }
+}, { passive: false });
+
+el.clockCanvas.addEventListener("touchmove", event => {
+  if (event.touches.length >= 2) {
+    event.preventDefault();
+    updateCanvasPinch(event.touches);
+  }
+}, { passive: false });
+
+el.clockCanvas.addEventListener("touchend", event => {
+  rememberTouchEnd(event);
+  if (state.pinch && event.touches.length < 2) endCanvasPinch();
+}, { passive: false });
+
+el.clockCanvas.addEventListener("touchcancel", () => {
+  endCanvasPinch();
+}, { passive: false });
 
 el.clockCanvas.addEventListener("wheel", event => {
   if (!event.ctrlKey) return;
@@ -1402,6 +1552,40 @@ async function saveSettings(event) {
   el.settingsDialog.close();
   await syncNow();
 }
+
+// iPad: Browser-Zoom außerhalb des Canvas unterbinden.
+for (const block of document.querySelectorAll('.topbar, .sidebar')) {
+  block.addEventListener('touchstart', event => {
+    if (event.touches.length >= 2) event.preventDefault();
+  }, { passive: false });
+  block.addEventListener('touchmove', event => {
+    if (event.touches.length >= 2) event.preventDefault();
+  }, { passive: false });
+  block.addEventListener('touchend', rememberTouchEnd, { passive: false });
+}
+
+document.addEventListener('gesturestart', event => {
+  event.preventDefault();
+}, { passive: false });
+document.addEventListener('gesturechange', event => {
+  event.preventDefault();
+}, { passive: false });
+document.addEventListener('gestureend', event => {
+  event.preventDefault();
+}, { passive: false });
+
+el.fileList.addEventListener('dblclick', event => {
+  if (event.target.closest('.file-row')) return;
+  event.preventDefault();
+  createNewText();
+});
+
+el.fileList.addEventListener('pointerup', event => {
+  if (event.pointerType !== 'touch') return;
+  if (event.target.closest('.file-row')) return;
+  event.preventDefault();
+  registerSidebarBlankTap('left');
+}, true);
 
 el.newTextBtn.addEventListener("click", createNewText);
 el.renameBtn.addEventListener("click", renameSelected);
