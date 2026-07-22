@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v21
+# Buch-Uhr iPad-PWA v22
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -263,3 +263,15 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Doppeltipp oder Doppelklick auf eine Trennlinie öffnet die Betitelung
 - F2 beziehungsweise der Umbenennen-Knopf betitelt eine ausgewählte Trennlinie
 - die Trennlinie behält beim Betiteln ihre Position im Stehsatz
+
+
+## Änderung in v22
+
+- Doppeltipp im Vorschautext schaltet das Fenster an Ort und Stelle in den Editiermodus
+- Cursor wird anhand der Doppeltipp-Position in den Text gesetzt
+- virtuelle Tastatur wird durch Fokussieren des Textfeldes geöffnet
+- Speichern und Abbrechen erscheinen im Vorschaufenster
+- langes Drücken auf eine Trennlinie aktiviert das Verschieben innerhalb des Stehsatzes
+- nur der mittlere Titelbereich der Trennlinie ist per Doppeltipp editierbar
+- rechte Leiste: deutliches Wischen nach links entfernt Textdatei oder Trennlinie aus dem Stehsatz
+- linke Leiste: deutliches Wischen nach rechts löscht die Datei aus OneDrive und aus dem Projekt

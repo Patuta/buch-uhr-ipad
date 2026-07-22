@@ -325,3 +325,72 @@ body.sidebars-hidden .canvas-wrap {
   line-height: 1.45;
   font-size: 14px;
 }
+
+
+/* v22: Vorschau wird an Ort und Stelle zum Editor */
+.side-preview-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.preview-edit-action {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* v22: Trennlinie mit eigenem, editierbarem Mittelteil */
+.reference-row.separator {
+  display: grid;
+  grid-template-columns: minmax(18px, 1fr) auto minmax(18px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+.separator-line {
+  height: 1px;
+  background: currentColor;
+  opacity: .72;
+  pointer-events: none;
+}
+.separator-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 7px;
+  border-radius: 5px;
+}
+.separator-title:active {
+  background: #315ea7;
+}
+.separator-dragging {
+  opacity: .72;
+  outline: 2px solid #ffcc4d;
+  z-index: 30;
+}
+
+/* v22: Wischgeste */
+.file-row,
+.reference-row {
+  transition: transform .16s ease;
+  will-change: transform;
+}
+.file-row.swiping,
+.reference-row.swiping {
+  transition: none;
+}
+.swipe-delete-ready {
+  background: #7a2727 !important;
+}

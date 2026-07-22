@@ -44,6 +44,9 @@ const state = {
   lastTouchEndTime: 0,
   lastSidebarFileTap: { key: null, time: 0 },
   previewRequestId: 0,
+  previewEditors: { left: null, right: null },
+  swipeAction: null,
+  separatorDrag: null,
 };
 
 
@@ -387,10 +390,14 @@ async function loadFolderFiles() {
 
 function clearSidePreviews() {
   state.previewRequestId += 1;
+  state.previewEditors.left = null;
+  state.previewEditors.right = null;
   el.leftPreview.classList.add("hidden");
   el.rightPreview.classList.add("hidden");
   el.leftPreviewBody.replaceChildren();
   el.rightPreviewBody.replaceChildren();
+  updatePreviewHeaderButtons("left");
+  updatePreviewHeaderButtons("right");
 }
 
 function previewElements(side) {
@@ -399,28 +406,194 @@ function previewElements(side) {
     : { panel: el.rightPreview, title: el.rightPreviewTitle, body: el.rightPreviewBody };
 }
 
+function previewHeader(side) {
+  return previewElements(side).panel.querySelector("header");
+}
+
+function updatePreviewHeaderButtons(side) {
+  const header = previewHeader(side);
+  if (!header) return;
+  header.querySelectorAll(".preview-edit-action").forEach(node => node.remove());
+
+  const editor = state.previewEditors[side];
+  if (!editor?.editing) return;
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "preview-edit-action";
+  cancel.textContent = "Abbrechen";
+  cancel.addEventListener("click", () => cancelPreviewEdit(side));
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "primary preview-edit-action";
+  save.textContent = "Speichern";
+  save.addEventListener("click", () => void savePreviewEdit(side));
+
+  const close = side === "left" ? el.leftPreviewClose : el.rightPreviewClose;
+  header.insertBefore(cancel, close);
+  header.insertBefore(save, close);
+}
+
 function setPreviewLoading(side, title) {
+  state.previewEditors[side] = null;
   const target = previewElements(side);
   target.title.textContent = title;
   target.body.textContent = "Lädt …";
   target.panel.classList.remove("hidden");
+  updatePreviewHeaderButtons(side);
 }
 
-function setPreviewText(side, title, text) {
+function textOffsetAtPoint(root, clientX, clientY) {
+  let node = null;
+  let offset = 0;
+
+  if (document.caretPositionFromPoint) {
+    const position = document.caretPositionFromPoint(clientX, clientY);
+    node = position?.offsetNode || null;
+    offset = position?.offset || 0;
+  } else if (document.caretRangeFromPoint) {
+    const range = document.caretRangeFromPoint(clientX, clientY);
+    node = range?.startContainer || null;
+    offset = range?.startOffset || 0;
+  }
+
+  if (!node || !root.contains(node)) return root.textContent.length;
+
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  try {
+    range.setEnd(node, offset);
+    return range.toString().length;
+  } catch {
+    return root.textContent.length;
+  }
+}
+
+function setPreviewText(side, title, text, source) {
   const target = previewElements(side);
   target.title.textContent = title;
   target.body.replaceChildren();
+
   const pre = document.createElement("pre");
+  pre.className = "preview-text";
   pre.textContent = text;
   target.body.append(pre);
   target.panel.classList.remove("hidden");
+
+  state.previewEditors[side] = {
+    side,
+    source,
+    title,
+    originalText: text,
+    editing: false,
+    textarea: null,
+  };
+  updatePreviewHeaderButtons(side);
+
+  let lastTap = { time: 0, x: 0, y: 0 };
+  pre.addEventListener("pointerup", event => {
+    if (event.pointerType !== "touch" && event.detail < 2) return;
+
+    const now = Date.now();
+    const isDouble = event.pointerType !== "touch"
+      ? event.detail >= 2
+      : now - lastTap.time <= 430
+        && Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) <= 34;
+
+    if (isDouble) {
+      event.preventDefault();
+      event.stopPropagation();
+      const caretOffset = textOffsetAtPoint(pre, event.clientX, event.clientY);
+      beginPreviewEdit(side, caretOffset);
+      lastTap = { time: 0, x: 0, y: 0 };
+    } else {
+      lastTap = { time: now, x: event.clientX, y: event.clientY };
+    }
+  });
 }
 
 function setPreviewMessage(side, title, message) {
+  state.previewEditors[side] = null;
   const target = previewElements(side);
   target.title.textContent = title;
   target.body.textContent = message;
   target.panel.classList.remove("hidden");
+  updatePreviewHeaderButtons(side);
+}
+
+function beginPreviewEdit(side, caretOffset = 0) {
+  const editor = state.previewEditors[side];
+  if (!editor || editor.editing) return;
+
+  const target = previewElements(side);
+  const textarea = document.createElement("textarea");
+  textarea.className = "side-preview-editor";
+  textarea.value = editor.originalText;
+  target.body.replaceChildren(textarea);
+
+  editor.editing = true;
+  editor.textarea = textarea;
+  updatePreviewHeaderButtons(side);
+
+  requestAnimationFrame(() => {
+    textarea.focus({ preventScroll: true });
+    const safeOffset = Math.max(0, Math.min(caretOffset, textarea.value.length));
+    textarea.setSelectionRange(safeOffset, safeOffset);
+    const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 20;
+    const linesBefore = textarea.value.slice(0, safeOffset).split("\n").length - 1;
+    textarea.scrollTop = Math.max(0, linesBefore * lineHeight - textarea.clientHeight * 0.42);
+  });
+}
+
+function cancelPreviewEdit(side) {
+  const editor = state.previewEditors[side];
+  if (!editor) return;
+  setPreviewText(side, editor.title, editor.originalText, editor.source);
+}
+
+async function savePreviewEdit(side) {
+  const editor = state.previewEditors[side];
+  if (!editor?.editing || !editor.textarea) return;
+
+  const value = editor.textarea.value.replace(/\r\n?/g, "\n");
+
+  try {
+    if (editor.source.type === "project") {
+      const doc = editor.source.doc;
+      const uploaded = await uploadByPath(
+        editor.source.relative || projectCopyRelative(doc),
+        value,
+        "text/plain; charset=utf-8",
+        editor.source.item?.eTag || ""
+      );
+      doc.character_count = value.length;
+      editor.source.item = uploaded;
+      await saveProject();
+      renderProgress();
+      renderDocuments();
+    } else {
+      const item = editor.source.item;
+      const accessToken = await token();
+      const response = await fetch(`${GRAPH_BASE}/me/drive/items/${item.id}/content`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+        body: value,
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Datei konnte nicht gespeichert werden.\n${response.status} ${response.statusText}\n${body}`);
+      }
+    }
+
+    setPreviewText(side, editor.title, value, editor.source);
+    toast("Datei gespeichert");
+  } catch (error) {
+    toast(error.message || String(error), 6000);
+  }
 }
 
 async function showProjectDocPreview(doc, side = "right") {
@@ -439,7 +612,12 @@ async function showProjectDocPreview(doc, side = "right") {
   try {
     const content = await getDocumentContent(doc);
     if (requestId !== state.previewRequestId) return;
-    setPreviewText(side, title, content.text);
+    setPreviewText(side, title, content.text, {
+      type: "project",
+      doc,
+      item: content.item,
+      relative: content.relative,
+    });
   } catch (error) {
     if (requestId !== state.previewRequestId) return;
     setPreviewMessage(side, title, error.message || String(error));
@@ -475,7 +653,11 @@ async function showReferencePreview(raw, side = "left") {
     if (!response.ok) throw new Error(`Datei konnte nicht geladen werden: ${name}`);
     const text = await response.text();
     if (requestId !== state.previewRequestId) return;
-    setPreviewText(side, title, text);
+    setPreviewText(side, title, text, {
+      type: "reference",
+      raw,
+      item,
+    });
   } catch (error) {
     if (requestId !== state.previewRequestId) return;
     setPreviewMessage(side, title, error.message || String(error));
@@ -483,20 +665,10 @@ async function showReferencePreview(raw, side = "left") {
 }
 
 async function activateSidebarFile(key, openEditor, previewFn) {
-  const now = Date.now();
-  const previous = state.lastSidebarFileTap;
-  const isSecondTap = previous.key === key && now - previous.time <= 430;
-
-  if (isSecondTap) {
-    state.lastSidebarFileTap = { key: null, time: 0 };
-    clearSidePreviews();
-    await openEditor();
-    return;
-  }
-
-  state.lastSidebarFileTap = { key, time: now };
+  state.lastSidebarFileTap = { key, time: Date.now() };
   await previewFn();
 }
+
 
 function fileIconClass(name) {
   const ext = suffix(name);
@@ -553,6 +725,12 @@ function makeFileRow(item) {
     updateSelectionVisuals();
     showContextMenu(event.clientX, event.clientY, doc);
   });
+
+  if (!item.folder) {
+    attachSwipeRemoval(row, "right", async () => {
+      await deleteLeftFile(item);
+    });
+  }
 
   return row;
 }
@@ -1271,6 +1449,205 @@ function registerRightBlankTap() {
   return false;
 }
 
+
+function resetSwipeRow(row) {
+  row.style.transform = "";
+  row.classList.remove("swiping", "swipe-delete-ready");
+}
+
+function attachSwipeRemoval(row, direction, onRemove) {
+  row.addEventListener("pointerdown", event => {
+    if (event.pointerType !== "touch") return;
+    if (state.separatorDrag) return;
+
+    const action = {
+      row,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      direction,
+      active: false,
+      cancelled: false,
+    };
+    state.swipeAction = action;
+  }, true);
+
+  row.addEventListener("pointermove", event => {
+    const action = state.swipeAction;
+    if (!action || action.row !== row || action.pointerId !== event.pointerId) return;
+    if (state.separatorDrag) return;
+
+    const dx = event.clientX - action.startX;
+    const dy = event.clientY - action.startY;
+    const directed = direction === "right" ? dx : -dx;
+
+    if (!action.active) {
+      if (Math.abs(dy) > 18 && Math.abs(dy) > Math.abs(dx)) {
+        action.cancelled = true;
+        return;
+      }
+      if (directed <= 10) return;
+      action.active = true;
+      row.classList.add("swiping");
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const distance = Math.max(0, Math.min(150, directed));
+    row.style.transform = `translateX(${direction === "right" ? distance : -distance}px)`;
+    row.classList.toggle("swipe-delete-ready", distance >= 92);
+  }, true);
+
+  row.addEventListener("pointerup", event => {
+    const action = state.swipeAction;
+    if (!action || action.row !== row || action.pointerId !== event.pointerId) return;
+    state.swipeAction = null;
+
+    const dx = event.clientX - action.startX;
+    const directed = direction === "right" ? dx : -dx;
+    if (action.active && directed >= 92) {
+      event.preventDefault();
+      event.stopPropagation();
+      void onRemove();
+    } else {
+      resetSwipeRow(row);
+    }
+  }, true);
+
+  row.addEventListener("pointercancel", () => {
+    if (state.swipeAction?.row === row) state.swipeAction = null;
+    resetSwipeRow(row);
+  }, true);
+}
+
+async function removeReferenceEntry(raw) {
+  if (!state.project) return;
+  const index = state.project.reference_files.indexOf(raw);
+  if (index < 0) return;
+
+  pushHistory();
+  state.project.reference_files.splice(index, 1);
+  if (state.selectedReferencePath === raw) state.selectedReferencePath = null;
+  clearSidePreviews();
+  await saveProject();
+  renderReferenceList();
+  updateSelectionVisuals();
+  toast("Aus dem Stehsatz entfernt");
+}
+
+async function deleteLeftFile(item) {
+  if (!item?.id || item.folder) return;
+
+  try {
+    const accessToken = await token();
+    const response = await fetch(`${GRAPH_BASE}/me/drive/items/${item.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok && response.status !== 204) {
+      const body = await response.text();
+      throw new Error(`Datei konnte nicht gelöscht werden.\n${response.status} ${response.statusText}\n${body}`);
+    }
+
+    const doc = findDocByName(item.name);
+    if (doc && state.project) {
+      pushHistory();
+      state.project.documents = state.project.documents.filter(entry => entry.id !== doc.id);
+      if (state.selectedDocId === doc.id) state.selectedDocId = null;
+      await saveProject();
+    }
+
+    if (state.selectedFileId === item.id) state.selectedFileId = null;
+    clearSidePreviews();
+    await loadFolderFiles();
+    renderAll();
+    toast("Datei gelöscht");
+  } catch (error) {
+    toast(error.message || String(error), 6000);
+    renderFileList();
+  }
+}
+
+function beginSeparatorLongPress(event, row, raw) {
+  if (event.pointerType !== "touch") return;
+
+  const action = {
+    row,
+    raw,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    timer: null,
+  };
+
+  action.timer = setTimeout(() => {
+    if (state.swipeAction?.active) return;
+    action.active = true;
+    state.separatorDrag = action;
+    state.swipeAction = null;
+    row.classList.add("separator-dragging");
+    try { row.setPointerCapture(event.pointerId); } catch {}
+  }, 560);
+
+  row.addEventListener("pointermove", function move(moveEvent) {
+    if (moveEvent.pointerId !== action.pointerId) return;
+
+    if (!action.active) {
+      const distance = Math.hypot(
+        moveEvent.clientX - action.startX,
+        moveEvent.clientY - action.startY
+      );
+      if (distance > 12) clearTimeout(action.timer);
+      return;
+    }
+
+    moveEvent.preventDefault();
+    moveEvent.stopPropagation();
+
+    const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+      ?.closest(".reference-row");
+    if (!target || target === row || !el.referenceList.contains(target)) return;
+
+    const rows = [...el.referenceList.children];
+    const targetIndex = rows.indexOf(target);
+    const rowIndex = rows.indexOf(row);
+    if (targetIndex < 0 || rowIndex < 0) return;
+
+    const rect = target.getBoundingClientRect();
+    const insertAfter = moveEvent.clientY > rect.top + rect.height / 2;
+    el.referenceList.insertBefore(row, insertAfter ? target.nextSibling : target);
+  }, true);
+
+  row.addEventListener("pointerup", async function up(upEvent) {
+    if (upEvent.pointerId !== action.pointerId) return;
+    clearTimeout(action.timer);
+
+    if (action.active) {
+      upEvent.preventDefault();
+      upEvent.stopPropagation();
+      row.classList.remove("separator-dragging");
+      state.separatorDrag = null;
+
+      const ordered = [...el.referenceList.querySelectorAll(".reference-row")]
+        .map(node => node.dataset.referenceSeparator || node.dataset.referencePath)
+        .filter(Boolean);
+
+      state.project.reference_files = ordered;
+      await saveProject();
+      renderReferenceList();
+      toast("Trennlinie verschoben");
+    }
+  }, { once: true, capture: true });
+
+  row.addEventListener("pointercancel", () => {
+    clearTimeout(action.timer);
+    row.classList.remove("separator-dragging");
+    if (state.separatorDrag === action) state.separatorDrag = null;
+  }, { once: true, capture: true });
+}
+
 function renderReferenceList() {
   el.referenceList.replaceChildren();
   if (!state.project) return;
@@ -1281,7 +1658,12 @@ function renderReferenceList() {
     if (isReferenceSeparator(raw)) {
       row.classList.add("separator");
       row.dataset.referenceSeparator = raw;
-      row.textContent = separatorTitle(raw) || "— —";
+      row.innerHTML = `
+        <span class="separator-line" aria-hidden="true"></span>
+        <span class="separator-title"></span>
+        <span class="separator-line" aria-hidden="true"></span>
+      `;
+      row.querySelector(".separator-title").textContent = separatorTitle(raw) || "— —";
 
       if (state.selectedReferencePath === raw) row.classList.add("selected");
 
@@ -1294,14 +1676,14 @@ function renderReferenceList() {
         updateSelectionVisuals();
       });
 
-      row.addEventListener("dblclick", event => {
+      row.querySelector(".separator-title").addEventListener("dblclick", event => {
         event.preventDefault();
         event.stopPropagation();
         renameReferenceSeparator(raw);
       });
 
-      row.addEventListener("pointerup", event => {
-        if (event.pointerType !== "touch") return;
+      row.querySelector(".separator-title").addEventListener("pointerup", event => {
+        if (event.pointerType !== "touch" || state.separatorDrag) return;
         event.preventDefault();
         event.stopPropagation();
 
@@ -1321,6 +1703,14 @@ function renderReferenceList() {
           updateSelectionVisuals();
         }
       }, true);
+
+      row.addEventListener("pointerdown", event => {
+        beginSeparatorLongPress(event, row, raw);
+      }, true);
+
+      attachSwipeRemoval(row, "left", async () => {
+        await removeReferenceEntry(raw);
+      });
     } else {
       const name = basenameAny(raw);
       const [label, cls] = fileIconClass(name);
@@ -1366,6 +1756,10 @@ function renderReferenceList() {
         state.selectedDocId = null;
         updateSelectionVisuals();
         showContextMenu(event.clientX, event.clientY, null);
+      });
+
+      attachSwipeRemoval(row, "left", async () => {
+        await removeReferenceEntry(raw);
       });
     }
     el.referenceList.append(row);
