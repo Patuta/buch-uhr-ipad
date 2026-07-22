@@ -218,3 +218,5 @@ body.sidebars-hidden .canvas-wrap {
 .doc-node {
   cursor: pointer;
 }
+
+.doc-node{touch-action:none}

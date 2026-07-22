@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v12
+# Buch-Uhr iPad-PWA v13
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -186,3 +186,10 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Ziehen auf einer freien Canvasfläche verschiebt die gesamte Uhr
 - Ziehen an einer Datei verschiebt weiterhin nur diese Datei auf dem Raster
 - Taste `0` setzt Zoom und Canvasposition zurück
+
+
+## Änderung in v13
+- einfacher Klick wählt nur aus und verändert nie die Position
+- Ziehen beginnt erst nach mehr als 10 Pixel Bewegung
+- Doppelklick und Enter öffnen ausgewählte Dateien
+- Rastertitel näher am Rand; Linien enden vor dem Text

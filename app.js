@@ -536,33 +536,19 @@ function renderRasterTitles() {
   el.rasterTitleLayer.replaceChildren();
   if (!state.project) return;
   const titles = state.project.raster_titles || {};
-
   for (const [minuteText, title] of Object.entries(titles)) {
     const minute = Number(minuteText) % 60;
     const major = minute % 15 === 0;
-    const radius = major ? 185 : 210;
-    const p = polar(minute * 60, radius);
-    const tick = polar(minute * 60, major ? 325 : 338);
-
-    el.rasterTitleLayer.append(svg("line", {
-      x1: tick.x, y1: tick.y, x2: p.x, y2: p.y, class: "connector"
-    }));
-
-    const boxWidth = major ? 230 : 205;
-    const boxHeight = major ? 76 : 62;
-    const foreign = svg("foreignObject", {
-      x: p.x - boxWidth / 2,
-      y: p.y - boxHeight / 2,
-      width: boxWidth,
-      height: boxHeight,
-      class: `raster-title-box ${major ? "major" : ""}`
-    });
-
-    const div = document.createElement("div");
-    div.className = `raster-title-html ${major ? "major" : ""}`;
-    div.textContent = String(title);
-    foreign.append(div);
-    el.rasterTitleLayer.append(foreign);
+    const textRadius = major ? 255 : 270;
+    const lineEndRadius = major ? 285 : 298;
+    const tickRadius = major ? 325 : 338;
+    const p = polar(minute * 60, textRadius);
+    const lineEnd = polar(minute * 60, lineEndRadius);
+    const tick = polar(minute * 60, tickRadius);
+    el.rasterTitleLayer.append(svg("line", {x1:tick.x,y1:tick.y,x2:lineEnd.x,y2:lineEnd.y,class:"connector"}));
+    const boxWidth = major ? 220 : 195; const boxHeight = major ? 68 : 56;
+    const foreign = svg("foreignObject", {x:p.x-boxWidth/2,y:p.y-boxHeight/2,width:boxWidth,height:boxHeight,class:`raster-title-box ${major ? "major" : ""}`});
+    const div=document.createElement("div"); div.className=`raster-title-html ${major ? "major" : ""}`; div.textContent=String(title); foreign.append(div); el.rasterTitleLayer.append(foreign);
   }
 }
 
@@ -576,6 +562,7 @@ function renderDocuments() {
     const right = Math.cos(p.angle) >= 0;
     const g = svg("g", {
       class: `doc-node ${doc.id === state.selectedDocId ? "selected" : ""}`,
+      "data-doc-id": doc.id,
       transform: `translate(${p.x} ${p.y})`,
       "data-doc-id": doc.id
     });
@@ -643,11 +630,22 @@ function beginDocDrag(event, doc, node) {
     moved: false,
     startX: event.clientX,
     startY: event.clientY,
+    originalSecond: Number(doc.start_second || 0),
   };
   node.classList.add("dragging");
   el.clockCanvas.setPointerCapture(event.pointerId);
 }
 
+
+el.documentLayer.addEventListener("dblclick", async event => {
+  const node = eventDocumentNode(event);
+  if (!node) return;
+  event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+  const doc = state.project?.documents?.find(entry => entry.id === node.dataset.docId);
+  if (!doc) return;
+  selectDoc(doc);
+  await openDocumentEditor(doc);
+}, true);
 
 el.clockCanvas.addEventListener("wheel", event => {
   if (!event.ctrlKey) return;
@@ -696,7 +694,9 @@ el.clockCanvas.addEventListener("pointerdown", event => {
 el.clockCanvas.addEventListener("pointermove", event => {
   const drag = state.dragging;
   if (drag && drag.pointerId === event.pointerId) {
-    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 5) drag.moved = true;
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.moved && distance <= 10) return;
+    if (!drag.moved) drag.moved = true;
     const raw = secondFromSvgEvent(event);
     drag.doc.start_second = magneticSecond(raw);
     renderProgress();
@@ -734,7 +734,13 @@ el.clockCanvas.addEventListener("pointerup", async event => {
 
     if (drag.moved) {
       await saveProject().catch(error => toast(error.message, 6000));
-    } else if (event.pointerType === "touch") {
+    } else {
+      drag.doc.start_second = drag.originalSecond;
+      renderProgress();
+      renderDocuments();
+    }
+
+    if (!drag.moved && event.pointerType === "touch") {
       const now = Date.now();
       if (state.lastDocTap.id === drag.doc.id && now - state.lastDocTap.time < 430) {
         state.lastDocTap = { id: null, time: 0 };
@@ -912,6 +918,22 @@ async function saveReferenceEditor(doc) {
     const body = await response.text();
     throw new Error(`Datei konnte nicht gespeichert werden.\n${response.status} ${response.statusText}\n${body}`);
   }
+}
+
+async function openSelectedItem() {
+  const doc = selectedDoc();
+  if (doc) { await openDocumentEditor(doc); return true; }
+  if (state.selectedReferencePath) { await openReferenceEditor(state.selectedReferencePath); return true; }
+  if (state.selectedFileId) {
+    const item = state.folderItems.find(entry => entry.id === state.selectedFileId);
+    const matching = item ? findDocByName(item.name) : null;
+    if (matching) { selectDoc(matching); await openDocumentEditor(matching); return true; }
+  }
+  return false;
+}
+
+function eventDocumentNode(event) {
+  return event.composedPath().find(node => node?.classList?.contains?.("doc-node")) || null;
 }
 
 function selectedDoc() {
@@ -1242,6 +1264,14 @@ window.addEventListener("keydown", event => {
     event.stopPropagation();
     event.stopImmediatePropagation();
     toggleSidebars();
+  }
+}, true);
+
+window.addEventListener("keydown", async event => {
+  const editable = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (event.key === "Enter" && !editable) {
+    const opened = await openSelectedItem();
+    if (opened) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); }
   }
 }, true);
 
