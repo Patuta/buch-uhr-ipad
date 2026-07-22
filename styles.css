@@ -220,3 +220,5 @@ body.sidebars-hidden .canvas-wrap {
 }
 
 .doc-node{touch-action:none}
+
+.file-row.selected,.reference-row.selected{background:#315ea7;outline:1px solid #6ea0ff}

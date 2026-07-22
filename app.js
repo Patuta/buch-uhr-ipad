@@ -382,6 +382,7 @@ function fileIconClass(name) {
 function makeFileRow(item) {
   const row = document.createElement("div");
   row.className = `file-row ${item.id === state.selectedFileId ? "selected" : ""}`;
+  row.dataset.fileItemId = item.id || "";
   const [label, cls] = fileIconClass(item.name);
   row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
   row.querySelector(".file-name").textContent = item.folder ? item.name : stem(item.name);
@@ -390,15 +391,12 @@ function makeFileRow(item) {
 
   row.addEventListener("click", event => {
     event.preventDefault();
+    event.stopPropagation();
     state.selectedFileId = item.id || null;
     state.selectedReferencePath = null;
     const doc = matchingDoc();
     state.selectedDocId = doc?.id || null;
-    renderFileList();
-    renderReferenceList();
-    renderDocuments();
-    el.renameBtn.disabled = !doc;
-    el.deleteBtn.disabled = !doc;
+    updateSelectionVisuals();
   });
 
   row.addEventListener("dblclick", async event => {
@@ -417,9 +415,7 @@ function makeFileRow(item) {
     state.selectedReferencePath = null;
     const doc = matchingDoc();
     state.selectedDocId = doc?.id || null;
-    renderFileList();
-    renderReferenceList();
-    renderDocuments();
+    updateSelectionVisuals();
     showContextMenu(event.clientX, event.clientY, doc);
   });
 
@@ -604,8 +600,9 @@ function renderDocuments() {
       showContextMenu(event.clientX, event.clientY, doc);
     });
     g.addEventListener("click", event => {
-      selectDoc(doc);
+      event.preventDefault();
       event.stopPropagation();
+      selectDoc(doc);
     });
 
     g.addEventListener("dblclick", async event => {
@@ -637,6 +634,30 @@ function beginDocDrag(event, doc, node) {
 }
 
 
+document.addEventListener("dblclick", async event => {
+  const path = event.composedPath();
+  const docNode = path.find(node => node?.classList?.contains?.("doc-node"));
+  if (docNode) {
+    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+    const doc = state.project?.documents?.find(entry => entry.id === docNode.dataset.docId);
+    if (doc) { selectDoc(doc); await openDocumentEditor(doc); }
+    return;
+  }
+  const fileRow = path.find(node => node?.classList?.contains?.("file-row"));
+  if (fileRow) {
+    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+    const item = state.folderItems.find(entry => entry.id === fileRow.dataset.fileItemId);
+    const doc = item ? findDocByName(item.name) : null;
+    if (doc) { state.selectedFileId=item.id; state.selectedReferencePath=null; state.selectedDocId=doc.id; updateSelectionVisuals(); await openDocumentEditor(doc); }
+    return;
+  }
+  const referenceRow = path.find(node => node?.classList?.contains?.("reference-row"));
+  if (referenceRow?.dataset.referencePath) {
+    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+    state.selectedReferencePath=referenceRow.dataset.referencePath; state.selectedFileId=null; state.selectedDocId=null; updateSelectionVisuals(); await openReferenceEditor(state.selectedReferencePath);
+  }
+}, true);
+
 el.documentLayer.addEventListener("dblclick", async event => {
   const node = eventDocumentNode(event);
   if (!node) return;
@@ -660,10 +681,15 @@ el.clockCanvas.addEventListener("contextmenu", event => {
   showContextMenu(event.clientX, event.clientY);
 });
 el.clockCanvas.addEventListener("dblclick", event => {
-  const onDocument = event.composedPath().some(
-    node => node?.classList?.contains?.("doc-node")
+  const path = event.composedPath();
+  const onFileElement = path.some(node =>
+    node?.classList?.contains?.("doc-node") ||
+    node?.classList?.contains?.("file-row") ||
+    node?.classList?.contains?.("reference-row") ||
+    node?.classList?.contains?.("doc-title-html") ||
+    node?.classList?.contains?.("doc-title-box")
   );
-  if (onDocument) return;
+  if (onFileElement) return;
   event.preventDefault();
   event.stopPropagation();
   editRasterTitle(secondFromSvgEvent(event));
@@ -785,19 +811,17 @@ function renderReferenceList() {
       const [label, cls] = fileIconClass(name);
       row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
       row.querySelector(".file-name").textContent = stem(name);
+      row.dataset.referencePath = raw;
 
       if (state.selectedReferencePath === raw) row.classList.add("selected");
 
       row.addEventListener("click", event => {
         event.preventDefault();
+        event.stopPropagation();
         state.selectedReferencePath = raw;
         state.selectedFileId = null;
         state.selectedDocId = null;
-        renderReferenceList();
-        renderFileList();
-        renderDocuments();
-        el.renameBtn.disabled = false;
-        el.deleteBtn.disabled = true;
+        updateSelectionVisuals();
       });
 
       row.addEventListener("dblclick", async event => {
@@ -816,9 +840,7 @@ function renderReferenceList() {
         state.selectedReferencePath = raw;
         state.selectedFileId = null;
         state.selectedDocId = null;
-        renderReferenceList();
-        renderFileList();
-        renderDocuments();
+        updateSelectionVisuals();
         showContextMenu(event.clientX, event.clientY, null);
       });
     }
@@ -936,15 +958,24 @@ function eventDocumentNode(event) {
   return event.composedPath().find(node => node?.classList?.contains?.("doc-node")) || null;
 }
 
+function updateSelectionVisuals() {
+  for (const node of el.documentLayer.querySelectorAll(".doc-node")) node.classList.toggle("selected", node.dataset.docId === state.selectedDocId);
+  for (const row of el.fileList.querySelectorAll(".file-row")) row.classList.toggle("selected", row.dataset.fileItemId === state.selectedFileId);
+  for (const row of el.referenceList.querySelectorAll(".reference-row")) row.classList.toggle("selected", row.dataset.referencePath === state.selectedReferencePath);
+  const hasDoc = Boolean(selectedDoc());
+  el.renameBtn.disabled = !(hasDoc || state.selectedReferencePath);
+  el.deleteBtn.disabled = !hasDoc;
+}
+
 function selectedDoc() {
   return state.project?.documents?.find(doc => doc.id === state.selectedDocId) || null;
 }
 
 function selectDoc(doc) {
   state.selectedDocId = doc?.id || null;
-  el.renameBtn.disabled = !doc;
-  el.deleteBtn.disabled = !doc;
-  renderDocuments();
+  state.selectedFileId = null;
+  state.selectedReferencePath = null;
+  updateSelectionVisuals();
 }
 
 function applyViewZoom() {
@@ -1259,7 +1290,8 @@ el.openExternalBtn.addEventListener("click", openExternal);
 
 window.addEventListener("keydown", event => {
   const editable = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
-  if (event.key === "Tab" && !editable) {
+  const toggleKey = event.key === "Tab" || event.key.toLowerCase() === "e";
+  if (toggleKey && !editable) {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
