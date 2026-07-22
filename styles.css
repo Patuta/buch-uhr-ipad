@@ -222,3 +222,26 @@ body.sidebars-hidden .canvas-wrap {
 .doc-node{touch-action:none}
 
 .file-row.selected,.reference-row.selected{background:#315ea7;outline:1px solid #6ea0ff}
+
+
+/* v16 */
+.raster-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.doc-node,
+.doc-node *,
+.doc-title-box,
+.doc-title-html {
+  pointer-events: all !important;
+}
+.raster-title-box {
+  overflow: hidden;
+  pointer-events: none;
+}
+.raster-title-html {
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 3px 6px;
+}

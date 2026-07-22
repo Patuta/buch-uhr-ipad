@@ -473,8 +473,9 @@ function renderClock() {
     const b = polar(minute * 60, outer);
     el.clockLayer.append(svg("line", {
       x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-      class: "tick", stroke: clockColor,
-      "stroke-width": major ? 6 : five ? 3.2 : 2
+      class: "tick raster-hit", stroke: clockColor,
+      "stroke-width": major ? 6 : five ? 3.2 : 2,
+      "data-second": String(minute * 60)
     }));
   }
 }
@@ -532,19 +533,53 @@ function renderRasterTitles() {
   el.rasterTitleLayer.replaceChildren();
   if (!state.project) return;
   const titles = state.project.raster_titles || {};
+  const circleRadius = 360;
+
   for (const [minuteText, title] of Object.entries(titles)) {
     const minute = Number(minuteText) % 60;
     const major = minute % 15 === 0;
-    const textRadius = major ? 255 : 270;
-    const lineEndRadius = major ? 285 : 298;
-    const tickRadius = major ? 325 : 338;
-    const p = polar(minute * 60, textRadius);
-    const lineEnd = polar(minute * 60, lineEndRadius);
-    const tick = polar(minute * 60, tickRadius);
-    el.rasterTitleLayer.append(svg("line", {x1:tick.x,y1:tick.y,x2:lineEnd.x,y2:lineEnd.y,class:"connector"}));
-    const boxWidth = major ? 220 : 195; const boxHeight = major ? 68 : 56;
-    const foreign = svg("foreignObject", {x:p.x-boxWidth/2,y:p.y-boxHeight/2,width:boxWidth,height:boxHeight,class:`raster-title-box ${major ? "major" : ""}`});
-    const div=document.createElement("div"); div.className=`raster-title-html ${major ? "major" : ""}`; div.textContent=String(title); foreign.append(div); el.rasterTitleLayer.append(foreign);
+    const second = minute * 60;
+    const angle = second / 3600 * Math.PI * 2 - Math.PI / 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+
+    const boxWidth = major ? 200 : 178;
+    const boxHeight = major ? 60 : 50;
+    const inset = 34;
+
+    let centerX = cos * 235;
+    let centerY = sin * 235;
+
+    if (minute === 15) centerX = circleRadius - inset - boxWidth / 2;
+    if (minute === 45) centerX = -circleRadius + inset + boxWidth / 2;
+    if (minute === 0) centerY = -circleRadius + inset + boxHeight / 2;
+    if (minute === 30) centerY = circleRadius - inset - boxHeight / 2;
+
+    const foreign = svg("foreignObject", {
+      x: centerX - boxWidth / 2,
+      y: centerY - boxHeight / 2,
+      width: boxWidth,
+      height: boxHeight,
+      class: `raster-title-box ${major ? "major" : ""}`
+    });
+
+    const div = document.createElement("div");
+    div.className = `raster-title-html ${major ? "major" : ""}`;
+    div.textContent = String(title);
+    foreign.append(div);
+
+    const lineStart = polar(second, major ? 325 : 337);
+    const lineStopRadius = major ? 292 : 304;
+    const lineStop = polar(second, lineStopRadius);
+
+    el.rasterTitleLayer.append(svg("line", {
+      x1: lineStart.x,
+      y1: lineStart.y,
+      x2: lineStop.x,
+      y2: lineStop.y,
+      class: "connector"
+    }));
+    el.rasterTitleLayer.append(foreign);
   }
 }
 
@@ -658,6 +693,30 @@ document.addEventListener("dblclick", async event => {
   }
 }, true);
 
+el.clockLayer.addEventListener("dblclick", event => {
+  const tick = event.composedPath().find(
+    node => node?.classList?.contains?.("raster-hit")
+  );
+  if (!tick) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+
+  editRasterTitle(Number(tick.dataset.second || 0));
+}, true);
+
+el.clockCanvas.addEventListener("dblclick", event => {
+  const onTick = event.composedPath().some(
+    node => node?.classList?.contains?.("raster-hit")
+  );
+  if (onTick) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+}, true);
+
 el.documentLayer.addEventListener("dblclick", async event => {
   const node = eventDocumentNode(event);
   if (!node) return;
@@ -680,21 +739,6 @@ el.clockCanvas.addEventListener("contextmenu", event => {
   event.preventDefault();
   showContextMenu(event.clientX, event.clientY);
 });
-el.clockCanvas.addEventListener("dblclick", event => {
-  const path = event.composedPath();
-  const onFileElement = path.some(node =>
-    node?.classList?.contains?.("doc-node") ||
-    node?.classList?.contains?.("file-row") ||
-    node?.classList?.contains?.("reference-row") ||
-    node?.classList?.contains?.("doc-title-html") ||
-    node?.classList?.contains?.("doc-title-box")
-  );
-  if (onFileElement) return;
-  event.preventDefault();
-  event.stopPropagation();
-  editRasterTitle(secondFromSvgEvent(event));
-});
-
 el.clockCanvas.addEventListener("pointerdown", event => {
   const path = event.composedPath();
   const onDocument = path.some(node => node?.classList?.contains?.("doc-node"));
