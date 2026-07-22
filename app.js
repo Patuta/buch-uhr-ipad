@@ -30,6 +30,10 @@ const state = {
   actionMode: "",
   actionMinute: 0,
   viewZoom: Number(localStorage.getItem("buchuhr.viewZoom") || 1),
+  viewPanX: Number(localStorage.getItem("buchuhr.viewPanX") || 0),
+  viewPanY: Number(localStorage.getItem("buchuhr.viewPanY") || 0),
+  panning: null,
+  lastDocTap: { id: null, time: 0 },
 };
 
 
@@ -532,26 +536,33 @@ function renderRasterTitles() {
   el.rasterTitleLayer.replaceChildren();
   if (!state.project) return;
   const titles = state.project.raster_titles || {};
+
   for (const [minuteText, title] of Object.entries(titles)) {
     const minute = Number(minuteText) % 60;
     const major = minute % 15 === 0;
-    const p = polar(minute * 60, major ? 255 : 275);
+    const radius = major ? 185 : 210;
+    const p = polar(minute * 60, radius);
     const tick = polar(minute * 60, major ? 325 : 338);
+
     el.rasterTitleLayer.append(svg("line", {
       x1: tick.x, y1: tick.y, x2: p.x, y2: p.y, class: "connector"
     }));
-    const textNode = svg("text", {
-      x: p.x, y: p.y, class: `raster-title ${major ? "major" : ""}`
+
+    const boxWidth = major ? 230 : 205;
+    const boxHeight = major ? 76 : 62;
+    const foreign = svg("foreignObject", {
+      x: p.x - boxWidth / 2,
+      y: p.y - boxHeight / 2,
+      width: boxWidth,
+      height: boxHeight,
+      class: `raster-title-box ${major ? "major" : ""}`
     });
-    const lines = wrapSvgText(String(title), major ? 25 : 21);
-    lines.forEach((line, index) => {
-      const tspan = svg("tspan", {
-        x: p.x,
-        dy: index === 0 ? `${-(lines.length - 1) * 10}px` : "22px"
-      }, line);
-      textNode.append(tspan);
-    });
-    el.rasterTitleLayer.append(textNode);
+
+    const div = document.createElement("div");
+    div.className = `raster-title-html ${major ? "major" : ""}`;
+    div.textContent = String(title);
+    foreign.append(div);
+    el.rasterTitleLayer.append(foreign);
   }
 }
 
@@ -613,6 +624,7 @@ function renderDocuments() {
     g.addEventListener("dblclick", async event => {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       selectDoc(doc);
       await openDocumentEditor(doc);
     });
@@ -650,33 +662,107 @@ el.clockCanvas.addEventListener("contextmenu", event => {
   showContextMenu(event.clientX, event.clientY);
 });
 el.clockCanvas.addEventListener("dblclick", event => {
-  const docNode = event.target.closest?.(".doc-node");
-  if (docNode) return;
+  const onDocument = event.composedPath().some(
+    node => node?.classList?.contains?.("doc-node")
+  );
+  if (onDocument) return;
   event.preventDefault();
+  event.stopPropagation();
   editRasterTitle(secondFromSvgEvent(event));
+});
+
+el.clockCanvas.addEventListener("pointerdown", event => {
+  const path = event.composedPath();
+  const onDocument = path.some(node => node?.classList?.contains?.("doc-node"));
+  const onProgress = path.some(node => node?.classList?.contains?.("progress-arc"));
+  if (onDocument || onProgress || event.button === 2) return;
+
+  const point = el.clockCanvas.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
+
+  state.panning = {
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    lastX: local.x,
+    lastY: local.y,
+    moved: false,
+  };
+  el.clockCanvas.setPointerCapture(event.pointerId);
 });
 
 el.clockCanvas.addEventListener("pointermove", event => {
   const drag = state.dragging;
-  if (!drag || drag.pointerId !== event.pointerId) return;
-  if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 5) drag.moved = true;
-  const raw = secondFromSvgEvent(event);
-  drag.doc.start_second = magneticSecond(raw);
-  renderProgress();
-  renderDocuments();
+  if (drag && drag.pointerId === event.pointerId) {
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 5) drag.moved = true;
+    const raw = secondFromSvgEvent(event);
+    drag.doc.start_second = magneticSecond(raw);
+    renderProgress();
+    renderDocuments();
+    return;
+  }
+
+  const pan = state.panning;
+  if (!pan || pan.pointerId !== event.pointerId) return;
+
+  if (Math.hypot(event.clientX - pan.startClientX, event.clientY - pan.startClientY) > 4) {
+    pan.moved = true;
+  }
+
+  const point = el.clockCanvas.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const local = point.matrixTransform(el.clockCanvas.getScreenCTM().inverse());
+
+  state.viewPanX += local.x - pan.lastX;
+  state.viewPanY += local.y - pan.lastY;
+  pan.lastX = local.x;
+  pan.lastY = local.y;
+  applyViewZoom();
 });
 
 el.clockCanvas.addEventListener("pointerup", async event => {
   const drag = state.dragging;
-  if (!drag || drag.pointerId !== event.pointerId) return;
-  state.dragging = { ...drag };
-  drag.node?.classList.remove("dragging");
-  el.clockCanvas.releasePointerCapture(event.pointerId);
-  if (drag.moved) {
-    await saveProject().catch(error => toast(error.message, 6000));
+  if (drag && drag.pointerId === event.pointerId) {
+    state.dragging = { ...drag };
+    drag.node?.classList.remove("dragging");
+    if (el.clockCanvas.hasPointerCapture(event.pointerId)) {
+      el.clockCanvas.releasePointerCapture(event.pointerId);
+    }
+
+    if (drag.moved) {
+      await saveProject().catch(error => toast(error.message, 6000));
+    } else if (event.pointerType === "touch") {
+      const now = Date.now();
+      if (state.lastDocTap.id === drag.doc.id && now - state.lastDocTap.time < 430) {
+        state.lastDocTap = { id: null, time: 0 };
+        await openDocumentEditor(drag.doc);
+      } else {
+        state.lastDocTap = { id: drag.doc.id, time: now };
+      }
+    }
+
+    setTimeout(() => { state.dragging = null; }, 0);
+    return;
   }
-  setTimeout(() => { state.dragging = null; }, 0);
+
+  const pan = state.panning;
+  if (pan && pan.pointerId === event.pointerId) {
+    if (el.clockCanvas.hasPointerCapture(event.pointerId)) {
+      el.clockCanvas.releasePointerCapture(event.pointerId);
+    }
+    state.panning = null;
+    applyViewZoom();
+  }
 });
+
+el.clockCanvas.addEventListener("pointercancel", event => {
+  if (state.dragging?.pointerId === event.pointerId) state.dragging = null;
+  if (state.panning?.pointerId === event.pointerId) state.panning = null;
+});
+
 
 function renderReferenceList() {
   el.referenceList.replaceChildren();
@@ -842,9 +928,12 @@ function selectDoc(doc) {
 function applyViewZoom() {
   state.viewZoom = Math.max(.55, Math.min(2.2, state.viewZoom));
   localStorage.setItem("buchuhr.viewZoom", String(state.viewZoom));
+  localStorage.setItem("buchuhr.viewPanX", String(state.viewPanX));
+  localStorage.setItem("buchuhr.viewPanY", String(state.viewPanY));
   el.clockCanvas.setAttribute("viewBox", "-620 -620 1240 1240");
+  const transform = `translate(${state.viewPanX} ${state.viewPanY}) scale(${state.viewZoom})`;
   for (const layer of [el.clockLayer, el.progressLayer, el.rasterTitleLayer, el.documentLayer]) {
-    layer.setAttribute("transform", `scale(${state.viewZoom})`);
+    layer.setAttribute("transform", transform);
   }
 }
 
@@ -855,6 +944,8 @@ function zoomBy(factor) {
 
 function fitClock() {
   state.viewZoom = 1;
+  state.viewPanX = 0;
+  state.viewPanY = 0;
   applyViewZoom();
 }
 

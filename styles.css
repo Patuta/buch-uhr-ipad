@@ -182,3 +182,39 @@ body.sidebars-hidden .canvas-wrap {
 .clock-canvas {
   overscroll-behavior: contain;
 }
+
+
+/* v12: Rastertitel bleiben vollständig innerhalb des Uhrkreises. */
+.raster-title-box {
+  overflow: visible;
+  pointer-events: none;
+}
+.raster-title-html {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.18;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: normal;
+  padding: 4px 8px;
+}
+.raster-title-html.major {
+  font-size: 17px;
+  font-weight: 700;
+}
+.clock-canvas {
+  cursor: grab;
+}
+.clock-canvas:active {
+  cursor: grabbing;
+}
+.doc-node {
+  cursor: pointer;
+}
