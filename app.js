@@ -560,7 +560,7 @@ function renderDocuments() {
   const color = state.project.clock_color || "#f4f4f4";
 
   for (const doc of state.project.documents.filter(d => d.is_on_clock !== false)) {
-    const p = polar(Number(doc.start_second || 0), 485);
+    const p = polar(Number(doc.start_second || 0), 520);
     const right = Math.cos(p.angle) >= 0;
     const g = svg("g", {
       class: `doc-node ${doc.id === state.selectedDocId ? "selected" : ""}`,
@@ -574,13 +574,22 @@ function renderDocuments() {
     icon.append(svg("text", { x: 0, y: 1 }, label));
     g.append(icon);
 
-    const title = svg("text", {
-      x: right ? 29 : -29, y: 0,
-      "text-anchor": right ? "start" : "end",
-      class: "doc-title",
-      fill: color
-    }, doc.title || stem(basenameAny(doc.project_path)));
-    g.append(title);
+    const titleText = doc.title || stem(basenameAny(doc.project_path));
+    const boxWidth = 230;
+    const boxHeight = 58;
+    const boxX = right ? 30 : -30 - boxWidth;
+    const foreign = svg("foreignObject", {
+      x: boxX,
+      y: -boxHeight / 2,
+      width: boxWidth,
+      height: boxHeight,
+      class: "doc-title-box"
+    });
+    const div = document.createElement("div");
+    div.className = `doc-title-html ${right ? "right" : "left"}`;
+    div.textContent = titleText;
+    foreign.append(div);
+    g.append(foreign);
 
     g.addEventListener("pointerdown", event => {
       selectDoc(doc);
@@ -1043,8 +1052,11 @@ async function openExternal() {
 }
 
 function applySidebarState() {
+  document.body.classList.toggle("sidebars-hidden", !state.sidebarsVisible);
   el.appLayout.classList.toggle("sidebars-visible", state.sidebarsVisible);
-  el.appLayout.classList.toggle("sidebars-hidden", !state.sidebarsVisible);
+  requestAnimationFrame(() => {
+    applyViewZoom();
+  });
 }
 
 function toggleSidebars() {
@@ -1111,8 +1123,10 @@ el.saveEditorBtn.addEventListener("click", saveEditor);
 el.openExternalBtn.addEventListener("click", openExternal);
 
 window.addEventListener("keydown", event => {
-  if (event.key === "Tab" && !["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) {
+  const editable = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (event.key === "Tab" && !editable) {
     event.preventDefault();
+    event.stopPropagation();
     event.stopImmediatePropagation();
     toggleSidebars();
   }

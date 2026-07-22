@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v9
+# Buch-Uhr iPad-PWA v10
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -157,3 +157,13 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - gespeicherter Zoom wird nach jedem Rendern angewendet
 - doppelte Tab-Erkennung entfernt
 - Seitenleistenstatus wird beim Start korrekt gesetzt
+
+
+## Änderung in v10
+
+- Dateititel werden in einem begrenzten mehrzeiligen Textfeld dargestellt
+- lange Titel laufen nicht mehr in Uhr oder Grafik hinein
+- Titel stehen weiter außerhalb des Uhrkreises
+- `Tab` besitzt nur noch einen einzigen Handler im Capture-Modus
+- `Tab` blendet ausschließlich beide Seitenleisten aus
+- Canvas und Uhr bleiben sichtbar und werden nach dem Umschalten neu berechnet
