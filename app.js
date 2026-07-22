@@ -42,6 +42,8 @@ const state = {
   lastSidebarBlankTap: { area: null, time: 0 },
   pinch: null,
   lastTouchEndTime: 0,
+  lastSidebarFileTap: { key: null, time: 0 },
+  previewRequestId: 0,
 };
 
 
@@ -77,7 +79,9 @@ const el = Object.fromEntries([
   "saveSettingsBtn", "clockCanvas", "clockLayer", "progressLayer", "rasterTitleLayer",
   "documentLayer", "referenceList", "fileList", "refreshFilesBtn", "emptyHint",
   "newTextBtn", "renameBtn", "deleteBtn", "zoomOutBtn", "zoomInBtn", "fitBtn", "undoBtn", "redoBtn", "editorDialog", "editorTitle", "editorText", "editorMeta",
-  "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast", "contextMenu", "actionDialog", "actionDialogTitle", "actionDialogLabel", "actionDialogInput", "actionDialogText", "newTextTitleLabel", "newTextTitleInput", "actionDialogSaveBtn", "actionColorFields", "backgroundColorInput", "clockColorInput", "progressColorInput"
+  "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast", "contextMenu", "actionDialog", "actionDialogTitle", "actionDialogLabel", "actionDialogInput", "actionDialogText", "newTextTitleLabel", "newTextTitleInput", "actionDialogSaveBtn", "actionColorFields", "backgroundColorInput", "clockColorInput", "progressColorInput",
+  "leftPreview", "leftPreviewTitle", "leftPreviewBody", "leftPreviewClose",
+  "rightPreview", "rightPreviewTitle", "rightPreviewBody", "rightPreviewClose"
 ].map(id => [id, document.getElementById(id)]));
 
 function toast(message, timeout = 2800) {
@@ -380,6 +384,120 @@ async function loadFolderFiles() {
   renderFileList();
 }
 
+
+function clearSidePreviews() {
+  state.previewRequestId += 1;
+  el.leftPreview.classList.add("hidden");
+  el.rightPreview.classList.add("hidden");
+  el.leftPreviewBody.replaceChildren();
+  el.rightPreviewBody.replaceChildren();
+}
+
+function previewElements(side) {
+  return side === "left"
+    ? { panel: el.leftPreview, title: el.leftPreviewTitle, body: el.leftPreviewBody }
+    : { panel: el.rightPreview, title: el.rightPreviewTitle, body: el.rightPreviewBody };
+}
+
+function setPreviewLoading(side, title) {
+  const target = previewElements(side);
+  target.title.textContent = title;
+  target.body.textContent = "Lädt …";
+  target.panel.classList.remove("hidden");
+}
+
+function setPreviewText(side, title, text) {
+  const target = previewElements(side);
+  target.title.textContent = title;
+  target.body.replaceChildren();
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  target.body.append(pre);
+  target.panel.classList.remove("hidden");
+}
+
+function setPreviewMessage(side, title, message) {
+  const target = previewElements(side);
+  target.title.textContent = title;
+  target.body.textContent = message;
+  target.panel.classList.remove("hidden");
+}
+
+async function showProjectDocPreview(doc, side = "right") {
+  const requestId = ++state.previewRequestId;
+  const title = doc.title || stem(basenameAny(doc.project_path));
+  setPreviewLoading(side, title);
+
+  const editable = [".txt", ".md"].includes(String(doc.suffix).toLowerCase())
+    || doc.source_type === "dragged_text";
+
+  if (!editable) {
+    setPreviewMessage(side, title, "Diese Datei kann in der Vorschau nicht als Text angezeigt werden.");
+    return;
+  }
+
+  try {
+    const content = await getDocumentContent(doc);
+    if (requestId !== state.previewRequestId) return;
+    setPreviewText(side, title, content.text);
+  } catch (error) {
+    if (requestId !== state.previewRequestId) return;
+    setPreviewMessage(side, title, error.message || String(error));
+  }
+}
+
+async function showReferencePreview(raw, side = "left") {
+  const requestId = ++state.previewRequestId;
+  const name = basenameAny(raw);
+  const title = stem(name);
+  setPreviewLoading(side, title);
+
+  const ext = suffix(name);
+  if (![".txt", ".md"].includes(ext)) {
+    setPreviewMessage(side, title, "Diese Datei kann in der Vorschau nicht als Text angezeigt werden.");
+    return;
+  }
+
+  try {
+    const item = findReferenceItem(raw) || await searchExactFile(name);
+    if (!item) throw new Error(`Datei in OneDrive nicht gefunden: ${name}`);
+
+    let response;
+    if (item["@microsoft.graph.downloadUrl"]) {
+      response = await fetch(item["@microsoft.graph.downloadUrl"]);
+    } else {
+      const accessToken = await token();
+      response = await fetch(`${GRAPH_BASE}/me/drive/items/${item.id}/content`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+
+    if (!response.ok) throw new Error(`Datei konnte nicht geladen werden: ${name}`);
+    const text = await response.text();
+    if (requestId !== state.previewRequestId) return;
+    setPreviewText(side, title, text);
+  } catch (error) {
+    if (requestId !== state.previewRequestId) return;
+    setPreviewMessage(side, title, error.message || String(error));
+  }
+}
+
+async function activateSidebarFile(key, openEditor, previewFn) {
+  const now = Date.now();
+  const previous = state.lastSidebarFileTap;
+  const isSecondTap = previous.key === key && now - previous.time <= 430;
+
+  if (isSecondTap) {
+    state.lastSidebarFileTap = { key: null, time: 0 };
+    clearSidePreviews();
+    await openEditor();
+    return;
+  }
+
+  state.lastSidebarFileTap = { key, time: now };
+  await previewFn();
+}
+
 function fileIconClass(name) {
   const ext = suffix(name);
   if (ext === ".docx") return ["W", "word"];
@@ -397,24 +515,33 @@ function makeFileRow(item) {
 
   const matchingDoc = () => findDocByName(item.name);
 
-  row.addEventListener("click", event => {
+  row.addEventListener("click", async event => {
     event.preventDefault();
     event.stopPropagation();
+
     state.selectedFileId = item.id || null;
     state.selectedReferencePath = null;
     const doc = matchingDoc();
     state.selectedDocId = doc?.id || null;
     updateSelectionVisuals();
+
+    if (!doc) return;
+
+    await activateSidebarFile(
+      `left:${doc.id}`,
+      async () => {
+        selectDoc(doc);
+        await openDocumentEditor(doc);
+      },
+      async () => {
+        await showProjectDocPreview(doc, "right");
+      }
+    );
   });
 
-  row.addEventListener("dblclick", async event => {
+  row.addEventListener("dblclick", event => {
     event.preventDefault();
     event.stopPropagation();
-    const doc = matchingDoc();
-    if (doc) {
-      selectDoc(doc);
-      await openDocumentEditor(doc);
-    }
   });
 
   row.addEventListener("contextmenu", event => {
@@ -479,11 +606,23 @@ function renderClock() {
     const outer = 358;
     const a = polar(minute * 60, inner);
     const b = polar(minute * 60, outer);
+    const tickSecond = minute * 60;
+
     el.clockLayer.append(svg("line", {
       x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-      class: "tick raster-hit", stroke: clockColor,
-      "stroke-width": major ? 6 : five ? 3.2 : 2,
-      "data-second": String(minute * 60)
+      class: "tick", stroke: clockColor,
+      "stroke-width": major ? 6 : five ? 3.2 : 2
+    }));
+
+    const hitInner = polar(tickSecond, major ? 314 : 324);
+    const hitOuter = polar(tickSecond, 374);
+    el.clockLayer.append(svg("line", {
+      x1: hitInner.x,
+      y1: hitInner.y,
+      x2: hitOuter.x,
+      y2: hitOuter.y,
+      class: "raster-hit",
+      "data-second": String(tickSecond)
     }));
   }
 }
@@ -963,6 +1102,7 @@ el.clockCanvas.addEventListener("pointerdown", event => {
   const onFile = path.some(node => node?.classList?.contains?.("canvas-file-target"));
   const onTick = path.some(node => node?.classList?.contains?.("raster-hit"));
   if (onFile || onTick || event.button === 2) return;
+  clearSidePreviews();
   beginCanvasPan(event);
 });
 
@@ -1096,24 +1236,33 @@ function renderReferenceList() {
 
       if (state.selectedReferencePath === raw) row.classList.add("selected");
 
-      row.addEventListener("click", event => {
+      row.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
+
         state.selectedReferencePath = raw;
         state.selectedFileId = null;
         state.selectedDocId = null;
         updateSelectionVisuals();
+
+        await activateSidebarFile(
+          `right:${raw}`,
+          async () => {
+            try {
+              await openReferenceEditor(raw);
+            } catch (error) {
+              toast(error.message, 6000);
+            }
+          },
+          async () => {
+            await showReferencePreview(raw, "left");
+          }
+        );
       });
 
-      row.addEventListener("dblclick", async event => {
+      row.addEventListener("dblclick", event => {
         event.preventDefault();
         event.stopPropagation();
-        state.selectedReferencePath = raw;
-        try {
-          await openReferenceEditor(raw);
-        } catch (error) {
-          toast(error.message, 6000);
-        }
       });
 
       row.addEventListener("contextmenu", event => {
@@ -1586,6 +1735,9 @@ el.fileList.addEventListener('pointerup', event => {
   event.preventDefault();
   registerSidebarBlankTap('left');
 }, true);
+
+el.leftPreviewClose.addEventListener("click", clearSidePreviews);
+el.rightPreviewClose.addEventListener("click", clearSidePreviews);
 
 el.newTextBtn.addEventListener("click", createNewText);
 el.renameBtn.addEventListener("click", renameSelected);

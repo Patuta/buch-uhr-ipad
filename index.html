@@ -39,6 +39,13 @@
         <button id="refreshFilesBtn">Aktualisieren</button>
       </div>
       <div id="fileList" class="file-list"></div>
+      <section id="leftPreview" class="side-preview hidden">
+        <header>
+          <strong id="leftPreviewTitle"></strong>
+          <button id="leftPreviewClose" class="icon-button" aria-label="Vorschau schließen">✕</button>
+        </header>
+        <div id="leftPreviewBody" class="side-preview-body"></div>
+      </section>
     </aside>
 
     <section class="canvas-wrap">
@@ -55,6 +62,13 @@
     <aside id="rightPanel" class="sidebar right">
       <h2>Stehsatz</h2>
       <div id="referenceList" class="reference-list"></div>
+      <section id="rightPreview" class="side-preview hidden">
+        <header>
+          <strong id="rightPreviewTitle"></strong>
+          <button id="rightPreviewClose" class="icon-button" aria-label="Vorschau schließen">✕</button>
+        </header>
+        <div id="rightPreviewBody" class="side-preview-body"></div>
+      </section>
     </aside>
   </main>
 

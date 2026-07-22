@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v18
+# Buch-Uhr iPad-PWA v20
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -243,3 +243,14 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Kontextmenü mit der Maus nur per Rechtsklick
 - Langdruck-Kontextmenü ausschließlich auf Touch
 - Rasterdialog ausschließlich per Doppelklick auf einen Rasterstrich
+
+
+## Änderung in v20
+
+- jeder Rasterstrich besitzt eine deutlich größere unsichtbare Trefferfläche
+- zweimaliges Antippen auf jedem Rasterstrich öffnet zuverlässig den Rastertitel
+- einfacher Tipp links zeigt die Datei rechts als Textvorschau
+- einfacher Tipp rechts zeigt die Datei links als Textvorschau
+- ein weiterer Tipp auf eine andere Datei wechselt den Vorschauinhalt
+- Doppeltipp auf Dateien links oder rechts öffnet den vollständigen Editor
+- Tipp auf freien Canvas schließt die Vorschau

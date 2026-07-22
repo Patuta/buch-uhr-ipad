@@ -273,3 +273,55 @@ body.sidebars-hidden .canvas-wrap {
   pointer-events: stroke;
   cursor: pointer;
 }
+
+
+/* v20: größere unsichtbare Raster-Trefferflächen */
+.raster-hit {
+  stroke: transparent !important;
+  stroke-width: 28 !important;
+  pointer-events: stroke !important;
+  cursor: pointer;
+}
+
+/* v20: Inhaltsvorschau auf der gegenüberliegenden Seite */
+.sidebar {
+  position: relative;
+}
+.side-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+.side-preview header {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.side-preview header strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.side-preview-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1.45;
+  font-size: 14px;
+}
