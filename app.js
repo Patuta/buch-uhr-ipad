@@ -1217,6 +1217,60 @@ window.addEventListener("blur", () => {
 });
 
 
+
+const SEPARATOR_PREFIX = "__BUCHUHR_SEPARATOR__:";
+
+function isReferenceSeparator(raw) {
+  return String(raw || "").startsWith(SEPARATOR_PREFIX);
+}
+
+function separatorTitle(raw) {
+  return String(raw || "").slice(SEPARATOR_PREFIX.length);
+}
+
+async function createReferenceSeparator() {
+  if (!state.project) return;
+  pushHistory();
+
+  const separator = `${SEPARATOR_PREFIX}`;
+  state.project.reference_files ||= [];
+  state.project.reference_files.push(separator);
+  state.selectedReferencePath = separator;
+  state.selectedFileId = null;
+  state.selectedDocId = null;
+
+  await saveProject();
+  renderReferenceList();
+  updateSelectionVisuals();
+}
+
+function renameReferenceSeparator(raw) {
+  state.selectedReferencePath = raw;
+  state.selectedFileId = null;
+  state.selectedDocId = null;
+  updateSelectionVisuals();
+  openActionDialog(
+    "renameSeparator",
+    "Trennlinie betiteln",
+    separatorTitle(raw)
+  );
+}
+
+function registerRightBlankTap() {
+  const now = Date.now();
+  const previous = state.lastSidebarBlankTap;
+  const isSecondTap = previous.area === "right" && now - previous.time <= 430;
+
+  if (isSecondTap) {
+    state.lastSidebarBlankTap = { area: null, time: 0 };
+    void createReferenceSeparator();
+    return true;
+  }
+
+  state.lastSidebarBlankTap = { area: "right", time: now };
+  return false;
+}
+
 function renderReferenceList() {
   el.referenceList.replaceChildren();
   if (!state.project) return;
@@ -1224,9 +1278,49 @@ function renderReferenceList() {
   for (const raw of state.project.reference_files || []) {
     const row = document.createElement("div");
     row.className = "reference-row";
-    if (String(raw).startsWith("__BUCHUHR_SEPARATOR__:")) {
+    if (isReferenceSeparator(raw)) {
       row.classList.add("separator");
-      row.textContent = String(raw).slice("__BUCHUHR_SEPARATOR__:".length) || "— —";
+      row.dataset.referenceSeparator = raw;
+      row.textContent = separatorTitle(raw) || "— —";
+
+      if (state.selectedReferencePath === raw) row.classList.add("selected");
+
+      row.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        state.selectedReferencePath = raw;
+        state.selectedFileId = null;
+        state.selectedDocId = null;
+        updateSelectionVisuals();
+      });
+
+      row.addEventListener("dblclick", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        renameReferenceSeparator(raw);
+      });
+
+      row.addEventListener("pointerup", event => {
+        if (event.pointerType !== "touch") return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const now = Date.now();
+        const key = `separator:${raw}`;
+        const previous = state.lastSidebarFileTap;
+        const isSecondTap = previous.key === key && now - previous.time <= 430;
+
+        if (isSecondTap) {
+          state.lastSidebarFileTap = { key: null, time: 0 };
+          renameReferenceSeparator(raw);
+        } else {
+          state.lastSidebarFileTap = { key, time: now };
+          state.selectedReferencePath = raw;
+          state.selectedFileId = null;
+          state.selectedDocId = null;
+          updateSelectionVisuals();
+        }
+      }, true);
     } else {
       const name = basenameAny(raw);
       const [label, cls] = fileIconClass(name);
@@ -1497,7 +1591,11 @@ function renameSelected() {
     return;
   }
   if (state.selectedReferencePath) {
-    openActionDialog("renameReference", "Stehsatzdatei umbenennen", stem(basenameAny(state.selectedReferencePath)));
+    if (isReferenceSeparator(state.selectedReferencePath)) {
+      renameReferenceSeparator(state.selectedReferencePath);
+    } else {
+      openActionDialog("renameReference", "Stehsatzdatei umbenennen", stem(basenameAny(state.selectedReferencePath)));
+    }
   }
 }
 
@@ -1539,6 +1637,15 @@ async function saveActionDialog() {
       const raw = state.selectedReferencePath;
       const ext = suffix(basenameAny(raw));
       const updated = raw.replace(/[^\\/]+$/, `${title}${ext}`);
+      const index = state.project.reference_files.indexOf(raw);
+      if (index >= 0) state.project.reference_files[index] = updated;
+      state.selectedReferencePath = updated;
+    }
+  } else if (state.actionMode === "renameSeparator") {
+    const title = el.actionDialogInput.value.trim();
+    const raw = state.selectedReferencePath;
+    if (raw && isReferenceSeparator(raw)) {
+      const updated = `${SEPARATOR_PREFIX}${title}`;
       const index = state.project.reference_files.indexOf(raw);
       if (index >= 0) state.project.reference_files[index] = updated;
       state.selectedReferencePath = updated;
@@ -1734,6 +1841,20 @@ el.fileList.addEventListener('pointerup', event => {
   if (event.target.closest('.file-row')) return;
   event.preventDefault();
   registerSidebarBlankTap('left');
+}, true);
+
+el.referenceList.addEventListener("dblclick", event => {
+  if (event.target.closest(".reference-row")) return;
+  event.preventDefault();
+  void createReferenceSeparator();
+});
+
+el.referenceList.addEventListener("pointerup", event => {
+  if (event.pointerType !== "touch") return;
+  if (event.target.closest(".reference-row")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  registerRightBlankTap();
 }, true);
 
 el.leftPreviewClose.addEventListener("click", clearSidePreviews);
