@@ -24,6 +24,10 @@ const state = {
   editorDoc: null,
   sidebarsVisible: localStorage.getItem("buchuhr.sidebars") !== "false",
   dragging: null,
+  selectedDocId: null,
+  actionMode: "",
+  actionMinute: 0,
+  viewZoom: Number(localStorage.getItem("buchuhr.viewZoom") || 1),
 };
 
 
@@ -58,8 +62,8 @@ const el = Object.fromEntries([
   "settingsDialog", "settingsForm", "clientIdInput", "tenantInput", "folderInput",
   "saveSettingsBtn", "clockCanvas", "clockLayer", "progressLayer", "rasterTitleLayer",
   "documentLayer", "referenceList", "fileList", "refreshFilesBtn", "emptyHint",
-  "undoBtn", "redoBtn", "editorDialog", "editorTitle", "editorText", "editorMeta",
-  "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast"
+  "newTextBtn", "renameBtn", "deleteBtn", "zoomOutBtn", "zoomInBtn", "fitBtn", "undoBtn", "redoBtn", "editorDialog", "editorTitle", "editorText", "editorMeta",
+  "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast", "contextMenu", "actionDialog", "actionDialogTitle", "actionDialogLabel", "actionDialogInput", "actionDialogText", "actionDialogSaveBtn", "actionColorFields", "backgroundColorInput", "clockColorInput", "progressColorInput"
 ].map(id => [id, document.getElementById(id)]));
 
 function toast(message, timeout = 2800) {
@@ -118,6 +122,7 @@ function pushHistory() {
   if (state.history.length > 50) state.history.shift();
   state.future = [];
   updateHistoryButtons();
+  applyViewZoom();
 }
 
 function updateHistoryButtons() {
@@ -522,7 +527,7 @@ function renderDocuments() {
     const p = polar(Number(doc.start_second || 0), 420);
     const right = Math.cos(p.angle) >= 0;
     const g = svg("g", {
-      class: "doc-node",
+      class: `doc-node ${doc.id === state.selectedDocId ? "selected" : ""}`,
       transform: `translate(${p.x} ${p.y})`,
       "data-doc-id": doc.id
     });
@@ -541,8 +546,21 @@ function renderDocuments() {
     }, doc.title || stem(basenameAny(doc.project_path)));
     g.append(title);
 
-    g.addEventListener("pointerdown", event => beginDocDrag(event, doc, g));
+    g.addEventListener("pointerdown", event => {
+      selectDoc(doc);
+      beginDocDrag(event, doc, g);
+      const hold = setTimeout(() => {
+        if (state.dragging && !state.dragging.moved) showContextMenu(event.clientX, event.clientY, doc);
+      }, 650);
+      g.addEventListener("pointerup", () => clearTimeout(hold), {once:true});
+      g.addEventListener("pointercancel", () => clearTimeout(hold), {once:true});
+    });
+    g.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      showContextMenu(event.clientX, event.clientY, doc);
+    });
     g.addEventListener("click", event => {
+      selectDoc(doc);
       if (!state.dragging?.moved) openDocumentEditor(doc);
       event.stopPropagation();
     });
@@ -565,6 +583,12 @@ function beginDocDrag(event, doc, node) {
   node.classList.add("dragging");
   el.clockCanvas.setPointerCapture(event.pointerId);
 }
+
+el.clockCanvas.addEventListener("contextmenu", event => {
+  event.preventDefault();
+  showContextMenu(event.clientX, event.clientY);
+});
+el.clockCanvas.addEventListener("dblclick", event => editRasterTitle(secondFromSvgEvent(event)));
 
 el.clockCanvas.addEventListener("pointermove", event => {
   const drag = state.dragging;
@@ -626,6 +650,147 @@ async function openReference(raw) {
   } catch (error) {
     toast(error.message, 5000);
   }
+}
+
+
+function selectedDoc() {
+  return state.project?.documents?.find(doc => doc.id === state.selectedDocId) || null;
+}
+
+function selectDoc(doc) {
+  state.selectedDocId = doc?.id || null;
+  el.renameBtn.disabled = !doc;
+  el.deleteBtn.disabled = !doc;
+  renderDocuments();
+}
+
+function applyViewZoom() {
+  state.viewZoom = Math.max(.55, Math.min(2.2, state.viewZoom));
+  localStorage.setItem("buchuhr.viewZoom", String(state.viewZoom));
+  const half = 520 / state.viewZoom;
+  el.clockCanvas.setAttribute("viewBox", `${-half} ${-half} ${half*2} ${half*2}`);
+}
+
+function zoomBy(factor) {
+  state.viewZoom *= factor;
+  applyViewZoom();
+}
+
+function fitClock() {
+  state.viewZoom = 1;
+  applyViewZoom();
+}
+
+function hideContextMenu() {
+  el.contextMenu.classList.add("hidden");
+}
+
+function showContextMenu(x, y, doc = null) {
+  if (doc) selectDoc(doc);
+  const hasDoc = Boolean(selectedDoc());
+  for (const button of el.contextMenu.querySelectorAll("button")) {
+    button.classList.toggle("hidden", ["open","rename","remove"].includes(button.dataset.action) && !hasDoc);
+  }
+  el.contextMenu.style.left = `${Math.min(x, innerWidth-240)}px`;
+  el.contextMenu.style.top = `${Math.min(y, innerHeight-340)}px`;
+  el.contextMenu.classList.remove("hidden");
+}
+
+function openActionDialog(mode, title, value = "") {
+  state.actionMode = mode;
+  el.actionDialogTitle.textContent = title;
+  el.actionDialogInput.value = value;
+  el.actionDialogText.value = "";
+  el.actionDialogInput.type = mode === "norm" ? "number" : "text";
+  el.actionDialogInput.classList.toggle("hidden", mode === "newText" || mode === "colors");
+  el.actionDialogText.classList.toggle("hidden", mode !== "newText");
+  el.actionColorFields.classList.toggle("hidden", mode !== "colors");
+  if (mode === "colors") {
+    el.backgroundColorInput.value = state.project?.background_color || "#17191f";
+    el.clockColorInput.value = state.project?.clock_color || "#f4f4f4";
+    el.progressColorInput.value = state.project?.progress_color || "#2e7df6";
+  }
+  el.actionDialog.showModal();
+}
+
+function createNewText() {
+  openActionDialog("newText", "Neue Textdatei");
+}
+
+function renameSelected() {
+  const doc = selectedDoc();
+  if (doc) openActionDialog("rename", "Datei umbenennen", doc.title || "");
+}
+
+async function removeSelected() {
+  const doc = selectedDoc();
+  if (!doc || !confirm(`„${doc.title}“ von der Uhr entfernen?`)) return;
+  pushHistory();
+  doc.is_on_clock = false;
+  state.selectedDocId = null;
+  await saveProject();
+  renderAll();
+}
+
+function editRasterTitle(second = 0) {
+  const minute = Math.round(second / 60) % 60;
+  state.actionMinute = minute;
+  openActionDialog("raster", `Rastertitel ${minute === 0 ? 60 : minute}`, state.project?.raster_titles?.[String(minute)] || "");
+}
+
+function editNormPages() {
+  openActionDialog("norm", "Normseiten", String(state.project?.norm_pages || 381));
+}
+
+function editColors() {
+  openActionDialog("colors", "Farben");
+}
+
+async function saveActionDialog() {
+  if (!state.project) return;
+  pushHistory();
+
+  if (state.actionMode === "rename") {
+    const doc = selectedDoc();
+    const title = el.actionDialogInput.value.trim();
+    if (doc && title) doc.title = title;
+  } else if (state.actionMode === "norm") {
+    state.project.norm_pages = Math.max(1, Math.round(Number(el.actionDialogInput.value) || 1));
+  } else if (state.actionMode === "raster") {
+    state.project.raster_titles ||= {};
+    const value = el.actionDialogInput.value.trim();
+    if (value) state.project.raster_titles[String(state.actionMinute)] = value;
+    else delete state.project.raster_titles[String(state.actionMinute)];
+  } else if (state.actionMode === "colors") {
+    state.project.background_color = el.backgroundColorInput.value;
+    state.project.clock_color = el.clockColorInput.value;
+    state.project.progress_color = el.progressColorInput.value;
+  } else if (state.actionMode === "newText") {
+    const text = el.actionDialogText.value.replace(/\r\n?/g, "\n").trim();
+    if (!text) return toast("Bitte Text eingeben.");
+    const title = (text.split(/\n/)[0].trim() || "Neue Textdatei").slice(0, 80);
+    const safe = title.replace(/[<>:"/\\|?*]/g, "_");
+    const filename = `00_00 – ${safe}.txt`;
+    await uploadByPath(`${FILES_DIR}/${filename}`, text + "\n", "text/plain; charset=utf-8");
+    state.project.documents.push({
+      id: crypto.randomUUID().replaceAll("-",""),
+      title,
+      source_type: "dragged_text",
+      original_path: "",
+      project_path: filename,
+      start_second: 0,
+      character_count: text.length,
+      text_cache_path: filename,
+      suffix: ".txt",
+      is_on_clock: true,
+      original_mtime_ns: 0
+    });
+  }
+
+  await saveProject();
+  el.actionDialog.close();
+  renderAll();
+  await loadFolderFiles().catch(console.warn);
 }
 
 function renderAll() {
@@ -731,6 +896,31 @@ async function saveSettings(event) {
   await syncNow();
 }
 
+el.newTextBtn.addEventListener("click", createNewText);
+el.renameBtn.addEventListener("click", renameSelected);
+el.deleteBtn.addEventListener("click", removeSelected);
+el.zoomOutBtn.addEventListener("click", () => zoomBy(.86));
+el.zoomInBtn.addEventListener("click", () => zoomBy(1.16));
+el.fitBtn.addEventListener("click", fitClock);
+el.actionDialogSaveBtn.addEventListener("click", saveActionDialog);
+
+el.contextMenu.addEventListener("click", async event => {
+  const action = event.target.closest("button")?.dataset.action;
+  if (!action) return;
+  hideContextMenu();
+  if (action === "open" && selectedDoc()) openDocumentEditor(selectedDoc());
+  else if (action === "rename") renameSelected();
+  else if (action === "remove") await removeSelected();
+  else if (action === "newText") createNewText();
+  else if (action === "raster") editRasterTitle(0);
+  else if (action === "norm") editNormPages();
+  else if (action === "colors") editColors();
+  else if (action === "fit") fitClock();
+});
+document.addEventListener("pointerdown", event => {
+  if (!el.contextMenu.contains(event.target)) hideContextMenu();
+});
+
 el.sidebarToggle.addEventListener("click", toggleSidebars);
 el.settingsBtn.addEventListener("click", openSettings);
 el.syncBtn.addEventListener("click", syncNow);
@@ -753,6 +943,14 @@ document.addEventListener("keydown", event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
     event.preventDefault();
     redo();
+  }
+  if (!["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) {
+    if (event.key.toLowerCase() === "n") { event.preventDefault(); createNewText(); }
+    else if (event.key === "F2") { event.preventDefault(); renameSelected(); }
+    else if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); removeSelected(); }
+    else if (event.key === "+" || event.key === "=") { event.preventDefault(); zoomBy(1.16); }
+    else if (event.key === "-") { event.preventDefault(); zoomBy(.86); }
+    else if (event.key === "0") { event.preventDefault(); fitClock(); }
   }
 });
 

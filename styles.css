@@ -103,3 +103,13 @@ dialog input, dialog textarea { width: 100%; background: #101218; color: var(--t
   .layout.sidebars-visible { grid-template-columns: min(78vw, 320px) minmax(0, 1fr) 0; }
   .layout.sidebars-visible .sidebar.right { display: none; }
 }
+
+.context-menu{position:fixed;z-index:100;min-width:220px;background:#20232b;border:1px solid var(--line);border-radius:9px;padding:5px;box-shadow:0 10px 35px rgba(0,0,0,.55)}
+.context-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:9px 10px}
+.context-menu button:hover,.context-menu button:focus{background:#315ea7}
+#actionDialogText{width:100%;min-height:280px;background:#101218;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:10px;resize:vertical}
+#actionColorFields{display:grid;gap:10px}
+#actionColorFields label{display:grid;grid-template-columns:1fr 80px;align-items:center}
+#actionColorFields input[type=color]{width:80px;height:42px;padding:2px}
+.doc-node.selected .doc-icon rect{stroke:#ffcc4d;stroke-width:4}
+.doc-node.selected .doc-title{fill:#ffcc4d;font-weight:700}

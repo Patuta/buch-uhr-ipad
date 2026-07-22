@@ -20,6 +20,12 @@
       <span id="projectName">iPad-PWA</span>
     </div>
     <div id="syncStatus" class="status offline">Nicht verbunden</div>
+    <button id="newTextBtn" class="icon-button" title="Neue Textdatei">N</button>
+    <button id="renameBtn" class="icon-button" title="Umbenennen">F2</button>
+    <button id="deleteBtn" class="icon-button" title="Von der Uhr entfernen">⌫</button>
+    <button id="zoomOutBtn" class="icon-button" title="Verkleinern">−</button>
+    <button id="zoomInBtn" class="icon-button" title="Vergrößern">+</button>
+    <button id="fitBtn" class="icon-button" title="Uhr einpassen">0</button>
     <button id="undoBtn" class="icon-button" title="Rückgängig">↶</button>
     <button id="redoBtn" class="icon-button" title="Wiederherstellen">↷</button>
     <button id="syncBtn" class="primary">Synchronisieren</button>
@@ -90,6 +96,36 @@
         <button id="openExternalBtn" type="button">In OneDrive öffnen</button>
         <button id="saveEditorBtn" type="button" class="primary">Speichern</button>
       </footer>
+    </form>
+  </dialog>
+
+  <div id="contextMenu" class="context-menu hidden">
+    <button data-action="open">Öffnen</button>
+    <button data-action="rename">Umbenennen</button>
+    <button data-action="remove">Von der Uhr entfernen</button>
+    <button data-action="newText">Neue Textdatei</button>
+    <button data-action="raster">Rastertitel bearbeiten</button>
+    <button data-action="norm">Normseiten</button>
+    <button data-action="colors">Farben</button>
+    <button data-action="fit">Uhr einpassen</button>
+  </div>
+
+  <dialog id="actionDialog">
+    <form method="dialog">
+      <h2 id="actionDialogTitle"></h2>
+      <label id="actionDialogLabel">
+        <input id="actionDialogInput">
+      </label>
+      <textarea id="actionDialogText" class="hidden"></textarea>
+      <div id="actionColorFields" class="hidden">
+        <label>Canvas <input id="backgroundColorInput" type="color"></label>
+        <label>Uhr <input id="clockColorInput" type="color"></label>
+        <label>Fortschritt <input id="progressColorInput" type="color"></label>
+      </div>
+      <div class="dialog-actions">
+        <button value="cancel">Abbrechen</button>
+        <button id="actionDialogSaveBtn" type="button" class="primary">Speichern</button>
+      </div>
     </form>
   </dialog>
 

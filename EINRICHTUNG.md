@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v2
+# Buch-Uhr iPad-PWA v6
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -115,3 +115,15 @@ Buch-Uhr-Einstellungen bleiben dabei erhalten.
 Projekt- und Textdateien werden direkt über den Microsoft-Graph-Endpunkt
 `/content` geladen. Die PWA ist nicht mehr darauf angewiesen, dass OneDrive
 eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
+
+
+## Änderung in v6
+
+- `N`: neue Textdatei
+- `F2`: ausgewählte Datei umbenennen
+- `Entf` oder Rücktaste: von der Uhr entfernen
+- `+`, `-`, `0`: Zoom und Uhr einpassen
+- sichtbare Schaltflächen für Touch
+- langes Antippen oder Rechtsklick: Kontextmenü
+- Rastertitel per Doppelklick oder Kontextmenü
+- Normseiten und Farben im Kontextmenü
