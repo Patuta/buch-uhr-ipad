@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#17191f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Buch-Uhr">
+  <title>Buch-Uhr iPad</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button id="sidebarToggle" class="icon-button" aria-label="Seitenleisten umschalten">☰</button>
+    <div class="brand">
+      <strong>Buch-Uhr</strong>
+      <span id="projectName">iPad-PWA</span>
+    </div>
+    <div id="syncStatus" class="status offline">Nicht verbunden</div>
+    <button id="undoBtn" class="icon-button" title="Rückgängig">↶</button>
+    <button id="redoBtn" class="icon-button" title="Wiederherstellen">↷</button>
+    <button id="syncBtn" class="primary">Synchronisieren</button>
+    <button id="settingsBtn" class="icon-button" aria-label="Einstellungen">⚙</button>
+  </header>
+
+  <main id="appLayout" class="layout sidebars-visible">
+    <aside id="leftPanel" class="sidebar left">
+      <h2>Projektdateien</h2>
+      <div class="sidebar-actions">
+        <button id="refreshFilesBtn">Aktualisieren</button>
+      </div>
+      <div id="fileList" class="file-list"></div>
+    </aside>
+
+    <section class="canvas-wrap">
+      <svg id="clockCanvas" class="clock-canvas" viewBox="-520 -520 1040 1040" role="application"
+           aria-label="Buch-Uhr">
+        <g id="clockLayer"></g>
+        <g id="progressLayer"></g>
+        <g id="rasterTitleLayer"></g>
+        <g id="documentLayer"></g>
+      </svg>
+      <div id="emptyHint" class="empty-hint hidden">Noch kein Projekt geladen.</div>
+    </section>
+
+    <aside id="rightPanel" class="sidebar right">
+      <h2>Stehsatz</h2>
+      <div id="referenceList" class="reference-list"></div>
+    </aside>
+  </main>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" id="settingsForm">
+      <h2>OneDrive-Verbindung</h2>
+      <label>
+        Microsoft-Anwendungs-ID (Client-ID)
+        <input id="clientIdInput" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000">
+      </label>
+      <label>
+        Mandant
+        <input id="tenantInput" autocomplete="off" value="common">
+      </label>
+      <label>
+        OneDrive-Projektordner
+        <input id="folderInput" autocomplete="off" placeholder="Thomas Buch">
+      </label>
+      <p class="help">Im Ordner müssen <code>Buch-Uhr.project.json</code> und der Unterordner <code>Dateien</code> liegen.</p>
+      <div class="dialog-actions">
+        <button value="cancel">Abbrechen</button>
+        <button id="saveSettingsBtn" value="default" class="primary">Speichern und anmelden</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="editorDialog" class="editor-dialog">
+    <form method="dialog">
+      <header>
+        <h2 id="editorTitle">Datei</h2>
+        <button id="closeEditorBtn" value="cancel" class="icon-button">✕</button>
+      </header>
+      <textarea id="editorText" spellcheck="true"></textarea>
+      <div id="docxMessage" class="docx-message hidden">
+        Word-Dateien werden in OneDrive beziehungsweise Word geöffnet.
+      </div>
+      <footer>
+        <span id="editorMeta"></span>
+        <button id="openExternalBtn" type="button">In OneDrive öffnen</button>
+        <button id="saveEditorBtn" type="button" class="primary">Speichern</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="./vendor/msal-browser.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
