@@ -396,16 +396,24 @@ body.sidebars-hidden .canvas-wrap {
 }
 
 
-/* v23: Safari-Seitenzoom in Vorschau und Leisten vollständig verhindern. */
-.topbar,
-.sidebar,
+/* v24: Safari-Doppeltippzoom nur im Vorschautext unterbinden */
 .side-preview,
 .side-preview-body,
 .preview-text,
 .side-preview-editor {
   touch-action: manipulation;
 }
-.preview-text {
-  -webkit-user-select: text;
-  user-select: text;
+
+/* v24: Dateien und Trennlinien im Stehsatz nach Langdruck verschieben */
+.reference-row {
+  touch-action: pan-y;
+}
+.reference-row.reference-dragging {
+  opacity: .78;
+  outline: 2px solid #ffcc4d;
+  background: #30343e;
+  z-index: 40;
+  position: relative;
+  transform: scale(1.02);
+  transition: none;
 }

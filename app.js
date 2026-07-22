@@ -47,6 +47,7 @@ const state = {
   previewEditors: { left: null, right: null },
   swipeAction: null,
   separatorDrag: null,
+  suppressReferenceClickUntil: 0,
 };
 
 
@@ -493,24 +494,26 @@ function setPreviewText(side, title, text, source) {
 
   let lastTap = { time: 0, x: 0, y: 0 };
 
-  pre.addEventListener("touchstart", event => {
-    if (event.touches.length > 1) return;
-    // Safari darf aus der Tippfolge keinen Seitenzoom ableiten.
-    event.preventDefault();
-  }, { passive: false });
-
-  pre.addEventListener("touchend", event => {
+  pre.addEventListener("dblclick", event => {
     event.preventDefault();
     event.stopPropagation();
+    const caretOffset = textOffsetAtPoint(pre, event.clientX, event.clientY);
+    beginPreviewEdit(side, caretOffset);
+  });
+
+  pre.addEventListener("touchend", event => {
+    if (event.changedTouches.length !== 1) return;
 
     const touch = event.changedTouches[0];
-    if (!touch) return;
-
     const now = Date.now();
     const isDouble = now - lastTap.time <= 430
       && Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) <= 34;
 
     if (isDouble) {
+      // Nur diesen zweiten Tipp abfangen. Dadurch zoomt Safari nicht,
+      // während alle Dateilisten normal weiterarbeiten.
+      event.preventDefault();
+      event.stopPropagation();
       const caretOffset = textOffsetAtPoint(pre, touch.clientX, touch.clientY);
       beginPreviewEdit(side, caretOffset);
       lastTap = { time: 0, x: 0, y: 0 };
@@ -518,13 +521,6 @@ function setPreviewText(side, title, text, source) {
       lastTap = { time: now, x: touch.clientX, y: touch.clientY };
     }
   }, { passive: false });
-
-  pre.addEventListener("dblclick", event => {
-    event.preventDefault();
-    event.stopPropagation();
-    const caretOffset = textOffsetAtPoint(pre, event.clientX, event.clientY);
-    beginPreviewEdit(side, caretOffset);
-  });
 }
 
 function setPreviewMessage(side, title, message) {
@@ -1583,8 +1579,9 @@ async function deleteLeftFile(item) {
   }
 }
 
-function beginSeparatorLongPress(event, row, raw) {
+function beginReferenceLongPress(event, row, raw) {
   if (event.pointerType !== "touch") return;
+  if (state.separatorDrag) return;
 
   const action = {
     row,
@@ -1594,25 +1591,33 @@ function beginSeparatorLongPress(event, row, raw) {
     startY: event.clientY,
     active: false,
     timer: null,
+    moveHandler: null,
+    upHandler: null,
+    cancelHandler: null,
   };
 
   action.timer = setTimeout(() => {
     if (state.swipeAction?.active) return;
+
     action.active = true;
     state.separatorDrag = action;
     state.swipeAction = null;
-    row.classList.add("separator-dragging");
-    try { row.setPointerCapture(event.pointerId); } catch {}
+    row.classList.add("reference-dragging");
+
+    try {
+      row.setPointerCapture(event.pointerId);
+    } catch {}
   }, 560);
 
-  row.addEventListener("pointermove", function move(moveEvent) {
+  action.moveHandler = moveEvent => {
     if (moveEvent.pointerId !== action.pointerId) return;
 
+    const distance = Math.hypot(
+      moveEvent.clientX - action.startX,
+      moveEvent.clientY - action.startY
+    );
+
     if (!action.active) {
-      const distance = Math.hypot(
-        moveEvent.clientX - action.startX,
-        moveEvent.clientY - action.startY
-      );
       if (distance > 12) clearTimeout(action.timer);
       return;
     }
@@ -1620,47 +1625,79 @@ function beginSeparatorLongPress(event, row, raw) {
     moveEvent.preventDefault();
     moveEvent.stopPropagation();
 
-    const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
-      ?.closest(".reference-row");
-    if (!target || target === row || !el.referenceList.contains(target)) return;
+    const otherRows = [...el.referenceList.querySelectorAll(".reference-row")]
+      .filter(candidate => candidate !== row);
 
-    const rows = [...el.referenceList.children];
-    const targetIndex = rows.indexOf(target);
-    const rowIndex = rows.indexOf(row);
-    if (targetIndex < 0 || rowIndex < 0) return;
-
-    const rect = target.getBoundingClientRect();
-    const insertAfter = moveEvent.clientY > rect.top + rect.height / 2;
-    el.referenceList.insertBefore(row, insertAfter ? target.nextSibling : target);
-  }, true);
-
-  row.addEventListener("pointerup", async function up(upEvent) {
-    if (upEvent.pointerId !== action.pointerId) return;
-    clearTimeout(action.timer);
-
-    if (action.active) {
-      upEvent.preventDefault();
-      upEvent.stopPropagation();
-      row.classList.remove("separator-dragging");
-      state.separatorDrag = null;
-
-      const ordered = [...el.referenceList.querySelectorAll(".reference-row")]
-        .map(node => node.dataset.referenceSeparator || node.dataset.referencePath)
-        .filter(Boolean);
-
-      state.project.reference_files = ordered;
-      await saveProject();
-      renderReferenceList();
-      toast("Trennlinie verschoben");
+    let before = null;
+    for (const candidate of otherRows) {
+      const rect = candidate.getBoundingClientRect();
+      if (moveEvent.clientY < rect.top + rect.height / 2) {
+        before = candidate;
+        break;
+      }
     }
-  }, { once: true, capture: true });
 
-  row.addEventListener("pointercancel", () => {
+    if (before) {
+      el.referenceList.insertBefore(row, before);
+    } else {
+      el.referenceList.append(row);
+    }
+
+    const listRect = el.referenceList.getBoundingClientRect();
+    const edge = 54;
+    if (moveEvent.clientY < listRect.top + edge) {
+      el.referenceList.scrollTop -= 12;
+    } else if (moveEvent.clientY > listRect.bottom - edge) {
+      el.referenceList.scrollTop += 12;
+    }
+  };
+
+  const finish = async (finishEvent, cancelled = false) => {
+    if (finishEvent.pointerId !== action.pointerId) return;
     clearTimeout(action.timer);
-    row.classList.remove("separator-dragging");
-    if (state.separatorDrag === action) state.separatorDrag = null;
-  }, { once: true, capture: true });
+
+    window.removeEventListener("pointermove", action.moveHandler, true);
+    window.removeEventListener("pointerup", action.upHandler, true);
+    window.removeEventListener("pointercancel", action.cancelHandler, true);
+
+    if (!action.active) return;
+
+    finishEvent.preventDefault();
+    finishEvent.stopPropagation();
+
+    row.classList.remove("reference-dragging");
+    state.separatorDrag = null;
+    state.suppressReferenceClickUntil = Date.now() + 450;
+
+    try {
+      if (row.hasPointerCapture?.(action.pointerId)) {
+        row.releasePointerCapture(action.pointerId);
+      }
+    } catch {}
+
+    if (cancelled) {
+      renderReferenceList();
+      return;
+    }
+
+    const ordered = [...el.referenceList.querySelectorAll(".reference-row")]
+      .map(node => node.dataset.referenceSeparator || node.dataset.referencePath)
+      .filter(Boolean);
+
+    state.project.reference_files = ordered;
+    await saveProject();
+    renderReferenceList();
+    toast(isReferenceSeparator(raw) ? "Trennlinie verschoben" : "Datei verschoben");
+  };
+
+  action.upHandler = event => { void finish(event, false); };
+  action.cancelHandler = event => { void finish(event, true); };
+
+  window.addEventListener("pointermove", action.moveHandler, true);
+  window.addEventListener("pointerup", action.upHandler, true);
+  window.addEventListener("pointercancel", action.cancelHandler, true);
 }
+
 
 function renderReferenceList() {
   el.referenceList.replaceChildren();
@@ -1684,6 +1721,7 @@ function renderReferenceList() {
       row.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
+        if (Date.now() < state.suppressReferenceClickUntil) return;
         state.selectedReferencePath = raw;
         state.selectedFileId = null;
         state.selectedDocId = null;
@@ -1719,7 +1757,7 @@ function renderReferenceList() {
       }, true);
 
       row.addEventListener("pointerdown", event => {
-        beginSeparatorLongPress(event, row, raw);
+        beginReferenceLongPress(event, row, raw);
       }, true);
 
       attachSwipeRemoval(row, "left", async () => {
@@ -1737,6 +1775,7 @@ function renderReferenceList() {
       row.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
+        if (Date.now() < state.suppressReferenceClickUntil) return;
 
         state.selectedReferencePath = raw;
         state.selectedFileId = null;
@@ -1771,6 +1810,10 @@ function renderReferenceList() {
         updateSelectionVisuals();
         showContextMenu(event.clientX, event.clientY, null);
       });
+
+      row.addEventListener("pointerdown", event => {
+        beginReferenceLongPress(event, row, raw);
+      }, true);
 
       attachSwipeRemoval(row, "left", async () => {
         await removeReferenceEntry(raw);
@@ -2216,14 +2259,6 @@ async function saveSettings(event) {
   el.settingsDialog.close();
   await syncNow();
 }
-
-// iPad/Safari: Seitenzoom vollständig sperren. Der Canvas verwendet seinen eigenen Pinch-Zoom.
-document.addEventListener("touchend", event => {
-  const target = event.target;
-  if (target?.closest?.(".clock-canvas")) return;
-  if (isEditableTarget(target)) return;
-  event.preventDefault();
-}, { passive: false, capture: true });
 
 // iPad: Browser-Zoom außerhalb des Canvas unterbinden.
 for (const block of document.querySelectorAll('.topbar, .sidebar')) {
