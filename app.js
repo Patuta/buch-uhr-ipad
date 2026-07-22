@@ -761,9 +761,9 @@ el.clockCanvas.addEventListener("pointerup", async event => {
     if (drag.moved) {
       await saveProject().catch(error => toast(error.message, 6000));
     } else {
+      // Reiner Klick: Position und vorhandenes DOM-Element bleiben unverändert.
+      // So kann der Browser den zweiten Klick als echten Doppelklick erkennen.
       drag.doc.start_second = drag.originalSecond;
-      renderProgress();
-      renderDocuments();
     }
 
     if (!drag.moved && event.pointerType === "touch") {

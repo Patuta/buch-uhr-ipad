@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v14
+# Buch-Uhr iPad-PWA v15
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -201,3 +201,12 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - Rasterdialog ignoriert Dateielemente
 - `E` schaltet wie `Tab` die Seitenleisten
 - auf dem iPad übernimmt der Menüknopf oben links diese Funktion
+
+
+## Änderung in v15
+
+- bei einem einfachen Klick auf eine Uhrdatei wird die Dateiebene nicht mehr neu gezeichnet
+- das angeklickte DOM-Element bleibt zwischen erstem und zweitem Klick erhalten
+- Firefox erkennt den Doppelklick deshalb zuverlässig als Doppelklick auf die Datei
+- der Rasterdialog erhält den zweiten Klick nicht mehr
+- nur ein tatsächliches Ziehen verändert Position und Darstellung
