@@ -1,4 +1,4 @@
-# Buch-Uhr iPad-PWA v7
+# Buch-Uhr iPad-PWA v8
 
 Diese erste Begleitfassung verwendet dasselbe `Buch-Uhr.project.json` wie das Windows-Programm und greift über Microsoft Graph auf den OneDrive-Projektordner zu.
 
@@ -137,3 +137,14 @@ eine temporäre `@microsoft.graph.downloadUrl` zurückgibt.
 - `F2` wirkt auf die links ausgewählte Projektdatei
 - Rechtsklick links öffnet das Kontextmenü
 - `Tab` blendet nur die beiden Seitenleisten aus; die Uhr bleibt sichtbar
+
+
+## Änderung in v8
+
+- links und rechts: einfacher Klick wählt nur aus
+- Doppelklick öffnet stets den internen Editor
+- OneDrive öffnet nur noch über „In OneDrive öffnen“
+- `F2` funktioniert auch im Stehsatz
+- Zoom verändert nur die Uhr, nicht die Seitenleisten
+- Dokumenttitel stehen weiter außerhalb der Uhr und sind kleiner
+- `Tab` wird im Capture-Modus abgefangen und blendet nur die Seitenleisten aus

@@ -26,6 +26,7 @@ const state = {
   dragging: null,
   selectedDocId: null,
   selectedFileId: null,
+  selectedReferencePath: null,
   actionMode: "",
   actionMinute: 0,
   viewZoom: Number(localStorage.getItem("buchuhr.viewZoom") || 1),
@@ -381,31 +382,38 @@ function makeFileRow(item) {
   row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
   row.querySelector(".file-name").textContent = item.folder ? item.name : stem(item.name);
 
-  const matchingDoc = () => state.project?.documents?.find(
-    doc => basenameAny(doc.project_path).toLocaleLowerCase("de") === item.name.toLocaleLowerCase("de")
-  ) || null;
+  const matchingDoc = () => findDocByName(item.name);
 
   row.addEventListener("click", event => {
     event.preventDefault();
     state.selectedFileId = item.id || null;
+    state.selectedReferencePath = null;
     const doc = matchingDoc();
     state.selectedDocId = doc?.id || null;
     renderFileList();
+    renderReferenceList();
     renderDocuments();
     el.renameBtn.disabled = !doc;
     el.deleteBtn.disabled = !doc;
   });
 
-  row.addEventListener("dblclick", () => {
-    if (item.webUrl) window.open(item.webUrl, "_blank", "noopener");
+  row.addEventListener("dblclick", async event => {
+    event.preventDefault();
+    const doc = matchingDoc();
+    if (doc) {
+      selectDoc(doc);
+      await openDocumentEditor(doc);
+    }
   });
 
   row.addEventListener("contextmenu", event => {
     event.preventDefault();
     state.selectedFileId = item.id || null;
+    state.selectedReferencePath = null;
     const doc = matchingDoc();
     state.selectedDocId = doc?.id || null;
     renderFileList();
+    renderReferenceList();
     renderDocuments();
     showContextMenu(event.clientX, event.clientY, doc);
   });
@@ -552,7 +560,7 @@ function renderDocuments() {
   const color = state.project.clock_color || "#f4f4f4";
 
   for (const doc of state.project.documents.filter(d => d.is_on_clock !== false)) {
-    const p = polar(Number(doc.start_second || 0), 420);
+    const p = polar(Number(doc.start_second || 0), 485);
     const right = Math.cos(p.angle) >= 0;
     const g = svg("g", {
       class: `doc-node ${doc.id === state.selectedDocId ? "selected" : ""}`,
@@ -652,12 +660,44 @@ function renderReferenceList() {
       row.textContent = String(raw).slice("__BUCHUHR_SEPARATOR__:".length) || "— —";
     } else {
       const name = basenameAny(raw);
-      const fake = { name };
       const [label, cls] = fileIconClass(name);
       row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
       row.querySelector(".file-name").textContent = stem(name);
-      row.addEventListener("dblclick", () => openReference(raw));
-      row.addEventListener("click", () => openReference(raw));
+
+      if (state.selectedReferencePath === raw) row.classList.add("selected");
+
+      row.addEventListener("click", event => {
+        event.preventDefault();
+        state.selectedReferencePath = raw;
+        state.selectedFileId = null;
+        state.selectedDocId = null;
+        renderReferenceList();
+        renderFileList();
+        renderDocuments();
+        el.renameBtn.disabled = false;
+        el.deleteBtn.disabled = true;
+      });
+
+      row.addEventListener("dblclick", async event => {
+        event.preventDefault();
+        state.selectedReferencePath = raw;
+        try {
+          await openReferenceEditor(raw);
+        } catch (error) {
+          toast(error.message, 6000);
+        }
+      });
+
+      row.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        state.selectedReferencePath = raw;
+        state.selectedFileId = null;
+        state.selectedDocId = null;
+        renderReferenceList();
+        renderFileList();
+        renderDocuments();
+        showContextMenu(event.clientX, event.clientY, null);
+      });
     }
     el.referenceList.append(row);
   }
@@ -681,6 +721,82 @@ async function openReference(raw) {
 }
 
 
+
+function findDocByName(name) {
+  const normalized = String(name || "").toLocaleLowerCase("de");
+  return state.project?.documents?.find(
+    doc => basenameAny(doc.project_path).toLocaleLowerCase("de") === normalized
+  ) || null;
+}
+
+function findReferenceItem(raw) {
+  const name = basenameAny(raw);
+  return state.folderItems.find(
+    item => item.name?.toLocaleLowerCase("de") === name.toLocaleLowerCase("de")
+  ) || null;
+}
+
+async function openReferenceEditor(raw) {
+  const name = basenameAny(raw);
+  const item = findReferenceItem(raw) || await searchExactFile(name);
+  if (!item) throw new Error(`Datei in OneDrive nicht gefunden: ${name}`);
+
+  const ext = suffix(name);
+  const editable = [".txt", ".md"].includes(ext);
+
+  state.editorDoc = {
+    id: `reference:${raw}`,
+    title: stem(name),
+    suffix: ext,
+    source_type: "reference",
+    project_path: name,
+    _referenceRaw: raw,
+    _webItem: item,
+    _relative: null,
+  };
+
+  el.editorTitle.textContent = stem(name);
+  el.editorMeta.textContent = "";
+  el.editorText.classList.toggle("hidden", !editable);
+  el.docxMessage.classList.toggle("hidden", editable);
+  el.saveEditorBtn.classList.toggle("hidden", !editable);
+
+  if (editable) {
+    let response;
+    if (item["@microsoft.graph.downloadUrl"]) {
+      response = await fetch(item["@microsoft.graph.downloadUrl"]);
+    } else {
+      const accessToken = await token();
+      response = await fetch(`${GRAPH_BASE}/me/drive/items/${item.id}/content`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+    if (!response.ok) throw new Error(`Datei konnte nicht geladen werden: ${name}`);
+    el.editorText.value = await response.text();
+  } else {
+    el.editorText.value = "";
+  }
+
+  el.editorDialog.showModal();
+}
+
+async function saveReferenceEditor(doc) {
+  const value = el.editorText.value.replace(/\r\n?/g, "\n");
+  const accessToken = await token();
+  const response = await fetch(`${GRAPH_BASE}/me/drive/items/${doc._webItem.id}/content`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "text/plain; charset=utf-8",
+    },
+    body: value,
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Datei konnte nicht gespeichert werden.\n${response.status} ${response.statusText}\n${body}`);
+  }
+}
+
 function selectedDoc() {
   return state.project?.documents?.find(doc => doc.id === state.selectedDocId) || null;
 }
@@ -695,8 +811,10 @@ function selectDoc(doc) {
 function applyViewZoom() {
   state.viewZoom = Math.max(.55, Math.min(2.2, state.viewZoom));
   localStorage.setItem("buchuhr.viewZoom", String(state.viewZoom));
-  const half = 520 / state.viewZoom;
-  el.clockCanvas.setAttribute("viewBox", `${-half} ${-half} ${half*2} ${half*2}`);
+  el.clockCanvas.setAttribute("viewBox", "-620 -620 1240 1240");
+  for (const layer of [el.clockLayer, el.progressLayer, el.rasterTitleLayer, el.documentLayer]) {
+    layer.setAttribute("transform", `scale(${state.viewZoom})`);
+  }
 }
 
 function zoomBy(factor) {
@@ -749,7 +867,13 @@ function createNewText() {
 
 function renameSelected() {
   const doc = selectedDoc();
-  if (doc) openActionDialog("rename", "Datei umbenennen", doc.title || "");
+  if (doc) {
+    openActionDialog("rename", "Datei umbenennen", doc.title || "");
+    return;
+  }
+  if (state.selectedReferencePath) {
+    openActionDialog("renameReference", "Stehsatzdatei umbenennen", stem(basenameAny(state.selectedReferencePath)));
+  }
 }
 
 async function removeSelected() {
@@ -784,6 +908,16 @@ async function saveActionDialog() {
     const doc = selectedDoc();
     const title = el.actionDialogInput.value.trim();
     if (doc && title) doc.title = title;
+  } else if (state.actionMode === "renameReference") {
+    const title = el.actionDialogInput.value.trim();
+    if (title && state.selectedReferencePath) {
+      const raw = state.selectedReferencePath;
+      const ext = suffix(basenameAny(raw));
+      const updated = raw.replace(/[^\\/]+$/, `${title}${ext}`);
+      const index = state.project.reference_files.indexOf(raw);
+      if (index >= 0) state.project.reference_files[index] = updated;
+      state.selectedReferencePath = updated;
+    }
   } else if (state.actionMode === "norm") {
     state.project.norm_pages = Math.max(1, Math.round(Number(el.actionDialogInput.value) || 1));
   } else if (state.actionMode === "raster") {
@@ -870,6 +1004,13 @@ async function saveEditor() {
   const doc = state.editorDoc;
   if (!doc) return;
   try {
+    if (doc.source_type === "reference") {
+      await saveReferenceEditor(doc);
+      el.editorDialog.close();
+      toast("Datei gespeichert");
+      return;
+    }
+
     pushHistory();
     const value = el.editorText.value.replace(/\r\n?/g, "\n");
     const uploaded = await uploadByPath(
@@ -945,6 +1086,7 @@ el.contextMenu.addEventListener("click", async event => {
   if (!action) return;
   hideContextMenu();
   if (action === "open" && selectedDoc()) openDocumentEditor(selectedDoc());
+  else if (action === "open" && state.selectedReferencePath) openReferenceEditor(state.selectedReferencePath);
   else if (action === "rename") renameSelected();
   else if (action === "remove") await removeSelected();
   else if (action === "newText") createNewText();
@@ -967,10 +1109,18 @@ el.saveSettingsBtn.addEventListener("click", saveSettings);
 el.saveEditorBtn.addEventListener("click", saveEditor);
 el.openExternalBtn.addEventListener("click", openExternal);
 
+window.addEventListener("keydown", event => {
+  if (event.key === "Tab" && !["INPUT","TEXTAREA"].includes(document.activeElement?.tagName)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    toggleSidebars();
+  }
+}, true);
+
 document.addEventListener("keydown", event => {
   if (event.key === "Tab" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     toggleSidebars();
     return;
   }

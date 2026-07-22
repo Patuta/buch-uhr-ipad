@@ -118,3 +118,8 @@ dialog input, dialog textarea { width: 100%; background: #101218; color: var(--t
 .layout.sidebars-hidden { grid-template-columns:0 minmax(0,1fr) 0 !important; }
 .layout.sidebars-hidden .sidebar { visibility:hidden !important; width:0 !important; min-width:0 !important; overflow:hidden !important; border:0 !important; }
 .layout.sidebars-hidden .canvas-wrap { display:block !important; visibility:visible !important; min-width:0 !important; min-height:0 !important; }
+
+.doc-title { font-size: 15px !important; }
+.reference-row.selected { background:#315ea7; outline:1px solid #6ea0ff; }
+.canvas-wrap { position:relative; z-index:1; }
+.sidebar { position:relative; z-index:2; }
