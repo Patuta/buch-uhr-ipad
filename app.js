@@ -1,7 +1,10 @@
 const { PublicClientApplication, InteractionRequiredAuthError } = window.msal;
 
 const PROJECT_FILE = "Buch-Uhr.project.json";
-const FILES_DIR = "Dateien";
+const FILES_DIR = "Uhr";
+const LEGACY_FILES_DIR = "Dateien";
+const REFERENCE_DIR = "Stehsatz";
+const TRASH_DIR = "Papierkorb";
 const CHARS_PER_PAGE = 1800;
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite"];
@@ -10,7 +13,8 @@ const state = {
   config: {
     clientId: localStorage.getItem("buchuhr.clientId") || "",
     tenant: localStorage.getItem("buchuhr.tenant") || "common",
-    folder: localStorage.getItem("buchuhr.folder") || "",
+    root: localStorage.getItem("buchuhr.root") || "Buch-Uhr",
+    folder: "",
   },
   msal: null,
   account: null,
@@ -45,6 +49,7 @@ const state = {
   lastSidebarFileTap: { key: null, time: 0 },
   previewRequestId: 0,
   previewEditors: { left: null, right: null },
+  lastError: null,
   swipeAction: null,
   separatorDrag: null,
   suppressReferenceClickUntil: 0,
@@ -55,7 +60,7 @@ function clearStaleMsalInteraction() {
   const preserved = {
     clientId: localStorage.getItem("buchuhr.clientId"),
     tenant: localStorage.getItem("buchuhr.tenant"),
-    folder: localStorage.getItem("buchuhr.folder"),
+    root: localStorage.getItem("buchuhr.root"),
     sidebars: localStorage.getItem("buchuhr.sidebars"),
   };
 
@@ -68,7 +73,7 @@ function clearStaleMsalInteraction() {
 
   if (preserved.clientId !== null) localStorage.setItem("buchuhr.clientId", preserved.clientId);
   if (preserved.tenant !== null) localStorage.setItem("buchuhr.tenant", preserved.tenant);
-  if (preserved.folder !== null) localStorage.setItem("buchuhr.folder", preserved.folder);
+  if (preserved.root !== null) localStorage.setItem("buchuhr.root", preserved.root);
   if (preserved.sidebars !== null) localStorage.setItem("buchuhr.sidebars", preserved.sidebars);
 }
 
@@ -80,12 +85,16 @@ function isInteractionInProgress(error) {
 const el = Object.fromEntries([
   "appLayout", "sidebarToggle", "projectName", "syncStatus", "syncBtn", "settingsBtn",
   "settingsDialog", "settingsForm", "clientIdInput", "tenantInput", "folderInput",
+  "authDiagDialog", "authDiagText", "authDiagCancelBtn", "authDiagContinueBtn",
+  "projectsBtn", "projectDialog", "projectList", "newProjectBtn", "openProjectBtn", "closeProjectBtn",
   "saveSettingsBtn", "clockCanvas", "clockLayer", "progressLayer", "rasterTitleLayer",
-  "documentLayer", "referenceList", "fileList", "refreshFilesBtn", "emptyHint",
+  "documentLayer", "referenceList", "referenceAddBtn", "fileList", "refreshFilesBtn", "emptyHint",
   "newTextBtn", "renameBtn", "deleteBtn", "zoomOutBtn", "zoomInBtn", "fitBtn", "undoBtn", "redoBtn", "editorDialog", "editorTitle", "editorText", "editorMeta",
   "docxMessage", "saveEditorBtn", "openExternalBtn", "closeEditorBtn", "toast", "contextMenu", "actionDialog", "actionDialogTitle", "actionDialogLabel", "actionDialogInput", "actionDialogText", "newTextTitleLabel", "newTextTitleInput", "actionDialogSaveBtn", "actionColorFields", "backgroundColorInput", "clockColorInput", "progressColorInput",
+  "titleColorDialog", "titleColorRows", "titleColorPlus", "titleColorSave",
   "leftPreview", "leftPreviewTitle", "leftPreviewBody", "leftPreviewClose",
-  "rightPreview", "rightPreviewTitle", "rightPreviewBody", "rightPreviewClose"
+  "rightPreview", "rightPreviewTitle", "rightPreviewBody", "rightPreviewClose",
+  "errorDialog", "errorDetailsText", "errorDetailsClose"
 ].map(id => [id, document.getElementById(id)]));
 
 function toast(message, timeout = 2800) {
@@ -98,15 +107,64 @@ function toast(message, timeout = 2800) {
 function setStatus(text, kind = "offline") {
   el.syncStatus.textContent = text;
   el.syncStatus.className = `status ${kind}`;
+  el.syncStatus.classList.toggle("clickable", kind === "error" && Boolean(state.lastError));
+  el.syncStatus.title = kind === "error" && state.lastError
+    ? "Fehlerdetails anzeigen"
+    : "";
+}
+
+function normalizeConfiguredPath(path = "") {
+  return String(path)
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/^\/+|\/+$/g, "");
+}
+
+function errorDetails(error, context = "") {
+  const message = error?.message || String(error || "Unbekannter Fehler");
+  const parts = [];
+  if (context) parts.push(context);
+  parts.push(message);
+  if (error?.status) parts.push(`HTTP-Status: ${error.status}`);
+  if (state.config.root) parts.push(`OneDrive-Projektstamm: ${state.config.root}`);
+  return parts.join("\n\n");
+}
+
+function rememberError(error, context = "") {
+  state.lastError = errorDetails(error, context);
+  setStatus("Fehler", "error");
+  el.errorDetailsText.textContent = state.lastError;
+}
+
+function showErrorDetails() {
+  if (!state.lastError) return;
+  el.errorDetailsText.textContent = state.lastError;
+  if (!el.errorDialog.open) el.errorDialog.showModal();
+}
+
+function clearRememberedError() {
+  state.lastError = null;
+  el.syncStatus.classList.remove("clickable");
+  el.syncStatus.title = "";
 }
 
 function encodeGraphPath(path) {
-  return path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+  return normalizeConfiguredPath(path).split("/").filter(Boolean).map(encodeURIComponent).join("/");
 }
 
 function projectPath(relative = "") {
-  const base = state.config.folder.replace(/^\/+|\/+$/g, "");
-  return [base, relative].filter(Boolean).join("/");
+  const base = normalizeConfiguredPath(state.config.folder);
+  return [base, normalizeRelative(relative)].filter(Boolean).join("/");
+}
+
+function projectsRootPath(relative = "") {
+  const base = normalizeConfiguredPath(state.config.root) || "Buch-Uhr";
+  return [base, normalizeRelative(relative)].filter(Boolean).join("/");
+}
+
+function normalizeRelative(path = "") {
+  return String(path).replace(/\\/g, "/").replace(/^\/+/, "");
 }
 
 function basenameAny(path = "") {
@@ -123,8 +181,165 @@ function suffix(name) {
 }
 
 function projectCopyRelative(doc) {
-  const name = basenameAny(doc.project_path);
+  const raw = normalizeRelative(doc.project_path);
+  if (raw.toLocaleLowerCase("de").startsWith(`${FILES_DIR.toLocaleLowerCase("de")}/`)) return raw;
+  const name = basenameAny(raw);
   return `${FILES_DIR}/${name}`;
+}
+
+function safeProjectStem(value = "Text") {
+  const cleaned = String(value || "Text")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+  return cleaned || "Text";
+}
+
+function stripClockPrefix(value = "") {
+  return String(value)
+    .replace(/^\d{2}\.\d{2}\s+/, "")
+    .replace(/^\d{2}_\d{2}\s*[–-]\s*/, "")
+    .trim() || "Text";
+}
+
+function clockPrefix(second = 0) {
+  const value = ((Math.round(Number(second) || 0) % 3600) + 3600) % 3600;
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}.${String(value % 60).padStart(2, "0")}`;
+}
+
+function clockFilename(title, second = 0) {
+  return `${clockPrefix(second)} ${safeProjectStem(title)}.txt`;
+}
+
+function plainFilename(title) {
+  return `${safeProjectStem(stripClockPrefix(title))}.txt`;
+}
+
+async function listFolderByRelative(relative = "") {
+  const absolute = encodeGraphPath(projectPath(relative));
+  const result = await graph(`/me/drive/root:/${absolute}:/children?$select=id,name,webUrl,file,folder,parentReference,lastModifiedDateTime&$top=500`);
+  return result.value || [];
+}
+
+async function uniqueNameInFolder(relative, desiredName, ignoreId = "") {
+  const used = new Set(
+    (await listFolderByRelative(relative))
+      .filter(item => item.id !== ignoreId)
+      .map(item => String(item.name || "").toLocaleLowerCase("de"))
+  );
+  if (!used.has(desiredName.toLocaleLowerCase("de"))) return desiredName;
+
+  const dot = desiredName.lastIndexOf(".");
+  const base = dot > 0 ? desiredName.slice(0, dot) : desiredName;
+  const ext = dot > 0 ? desiredName.slice(dot) : "";
+  let number = 2;
+  while (used.has(`${base} (${number})${ext}`.toLocaleLowerCase("de"))) number += 1;
+  return `${base} (${number})${ext}`;
+}
+
+async function folderItemForRelative(relative = "") {
+  if (!relative) return graphItemByAbsolutePath(projectPath());
+  await ensureFolderPath(projectPath(relative));
+  return graphItemByAbsolutePath(projectPath(relative));
+}
+
+async function moveDriveItem(item, targetRelative, desiredName) {
+  const parent = await folderItemForRelative(targetRelative);
+  const name = await uniqueNameInFolder(targetRelative, desiredName, item.id);
+  return graph(`/me/drive/items/${item.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parentReference: { id: parent.id }, name }),
+  });
+}
+
+async function deleteDriveItem(item) {
+  const accessToken = await token();
+  const response = await fetch(`${GRAPH_BASE}/me/drive/items/${item.id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok && response.status !== 204) {
+    const body = await response.text();
+    throw new Error(`Datei konnte nicht gelöscht werden.\n${response.status} ${response.statusText}\n${body}`);
+  }
+}
+
+async function moveClockDocToFolder(doc, targetRelative) {
+  const item = await getItemByPath(projectCopyRelative(doc));
+  const moved = await moveDriveItem(item, targetRelative, plainFilename(doc.title));
+
+  state.project.documents = (state.project.documents || []).filter(entry => entry.id !== doc.id);
+  if (state.selectedDocId === doc.id) state.selectedDocId = null;
+
+  if (targetRelative === REFERENCE_DIR) {
+    state.project.reference_files ||= [];
+    const raw = `${REFERENCE_DIR}/${moved.name}`;
+    if (!state.project.reference_files.includes(raw)) state.project.reference_files.push(raw);
+  }
+
+  await saveProject();
+  await loadFolderFiles();
+  renderAll();
+  return moved;
+}
+
+async function renameClockDocForState(doc, title = doc.title, second = doc.start_second) {
+  const item = await getItemByPath(projectCopyRelative(doc));
+  const name = await uniqueNameInFolder(FILES_DIR, clockFilename(title, second), item.id);
+  const parent = await folderItemForRelative(FILES_DIR);
+  const updated = await graph(`/me/drive/items/${item.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parentReference: { id: parent.id }, name }),
+  });
+  doc.title = stripClockPrefix(stem(updated.name));
+  doc.project_path = `${FILES_DIR}/${updated.name}`;
+  doc.text_cache_path = doc.project_path;
+  doc.original_path = "";
+  doc.source_type = "project_text";
+  doc.suffix = ".txt";
+  doc.is_on_clock = true;
+  doc.original_mtime_ns = 0;
+  return updated;
+}
+
+async function attachProjectTxtToClock(relative, second = 0) {
+  const normalized = normalizeRelative(relative);
+  const item = await getItemByPath(normalized);
+  if (item.folder || suffix(item.name) !== ".txt") throw new Error("Auf die Uhr können nur Projekt-TXT-Dateien gelegt werden.");
+
+  const title = stripClockPrefix(stem(item.name));
+  const name = await uniqueNameInFolder(FILES_DIR, clockFilename(title, second), item.id);
+  const moved = await moveDriveItem(item, FILES_DIR, name);
+
+  const { response } = await downloadByPath(`${FILES_DIR}/${moved.name}`);
+  const content = await response.text();
+  const doc = {
+    id: crypto.randomUUID().replaceAll("-", ""),
+    title,
+    source_type: "project_text",
+    original_path: "",
+    project_path: `${FILES_DIR}/${moved.name}`,
+    start_second: ((Math.round(second) % 3600) + 3600) % 3600,
+    character_count: content.length,
+    text_cache_path: `${FILES_DIR}/${moved.name}`,
+    suffix: ".txt",
+    is_on_clock: true,
+    original_mtime_ns: 0
+  };
+  state.project.documents ||= [];
+  state.project.documents.push(doc);
+
+  state.project.reference_files = (state.project.reference_files || []).filter(raw =>
+    isReferenceSeparator(raw) || normalizeRelative(raw).toLocaleLowerCase("de") !== normalized.toLocaleLowerCase("de")
+  );
+
+  await saveProject();
+  await loadFolderFiles();
+  renderAll();
+  return doc;
 }
 
 function magneticSecond(raw, threshold = 9) {
@@ -201,9 +416,42 @@ async function ensureMsal() {
   return state.msal;
 }
 
+
+function showAuthDiagnostics() {
+  const tenant = state.config.tenant || "common";
+  const redirectUri = location.origin + location.pathname;
+  const authority = `https://login.microsoftonline.com/${tenant}`;
+  const authorizeEndpoint = `${authority}/oauth2/v2.0/authorize`;
+  const lines = [
+    `Client-ID: ${state.config.clientId}`,
+    `Mandant: ${tenant}`,
+    `Authority: ${authority}`,
+    `Authorize-Endpunkt: ${authorizeEndpoint}`,
+    `Redirect-URI: ${redirectUri}`,
+    `Redirect-Startseite: ${redirectUri}`,
+    `Scopes: ${SCOPES.join(" ")}`,
+    `Aktuelle Seite: ${location.href}`,
+    `Origin: ${location.origin}`,
+    `Pfad: ${location.pathname}`,
+    `Browser: ${navigator.userAgent}`,
+  ];
+  el.authDiagText.textContent = lines.join("\n");
+  return new Promise(resolve => {
+    const finish = value => {
+      el.authDiagDialog.removeEventListener("close", onClose);
+      resolve(value);
+    };
+    const onClose = () => finish(el.authDiagDialog.returnValue === "default");
+    el.authDiagDialog.addEventListener("close", onClose, { once: true });
+    el.authDiagDialog.showModal();
+  });
+}
+
 async function signIn() {
   const client = await ensureMsal();
   if (!state.account) {
+    const continueToMicrosoft = await showAuthDiagnostics();
+    if (!continueToMicrosoft) return null;
     try {
       await client.loginRedirect({
         scopes: SCOPES,
@@ -314,21 +562,298 @@ async function uploadByPath(relative, body, contentType, etag = "") {
   });
 }
 
+async function graphItemByAbsolutePath(path) {
+  const encoded = encodeGraphPath(path);
+  return graph(`/me/drive/root:/${encoded}?$select=id,name,eTag,lastModifiedDateTime,webUrl,file,folder`);
+}
+
+async function ensureFolderPath(path) {
+  const parts = normalizeRelative(path).split("/").filter(Boolean);
+  let current = "";
+  for (const part of parts) {
+    const target = [current, part].filter(Boolean).join("/");
+    try {
+      await graphItemByAbsolutePath(target);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      const parent = current ? `/me/drive/root:/${encodeGraphPath(current)}:/children` : "/me/drive/root/children";
+      await graph(parent, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: part, folder: {}, "@microsoft.graph.conflictBehavior": "fail" }),
+      });
+    }
+    current = target;
+  }
+}
+
+async function listProjects() {
+  await ensureFolderPath(projectsRootPath());
+  const root = encodeGraphPath(projectsRootPath());
+  const result = await graph(`/me/drive/root:/${root}:/children?$select=id,name,file,folder,lastModifiedDateTime&$top=200`);
+  const children = result.value || [];
+
+  if (children.some(item => item.file && item.name === PROJECT_FILE)) {
+    throw new Error(
+      "Der eingetragene OneDrive-Projektstamm zeigt bereits direkt auf ein Buch-Uhr-Projekt. " +
+      "Trage den übergeordneten Ordner ein, in dem die einzelnen Buch-Uhr-Projekte liegen. " +
+      "Beispiel: Liegt das Projekt in …/Thomas Buch/Thomas Uhr, lautet der Projektstamm …/Thomas Buch."
+    );
+  }
+
+  return children
+    .filter(item => item.folder)
+    .sort((a, b) => a.name.localeCompare(b.name, "de"));
+}
+
+function rememberProjectFolder(folder) {
+  const root = state.config.root.replace(/^\/+|\/+$/g, "");
+  const prefix = root ? `${root}/` : "";
+  const projectName = folder.startsWith(prefix) ? folder.slice(prefix.length) : folder;
+  const recent = JSON.parse(localStorage.getItem("buchuhr.recentProjects") || "[]")
+    .filter(name => name !== projectName);
+  recent.unshift(projectName);
+  localStorage.setItem("buchuhr.recentProjects", JSON.stringify(recent.slice(0, 12)));
+}
+
+async function showProjectChooser() {
+  if (!state.config.clientId) {
+    openSettings();
+    return;
+  }
+  await ensureMsal();
+  await signIn();
+  const projects = await listProjects();
+  const recent = JSON.parse(localStorage.getItem("buchuhr.recentProjects") || "[]");
+  const rank = new Map(recent.map((name, index) => [name, index]));
+  projects.sort((a, b) => {
+    const ar = rank.has(a.name) ? rank.get(a.name) : 9999;
+    const br = rank.has(b.name) ? rank.get(b.name) : 9999;
+    return ar - br || a.name.localeCompare(b.name, "de");
+  });
+
+  el.projectList.replaceChildren();
+  for (const item of projects) {
+    const option = document.createElement("option");
+    option.value = item.name;
+    option.textContent = rank.has(item.name) ? `Zuletzt: ${item.name}` : item.name;
+    el.projectList.append(option);
+  }
+  if (projects.length) el.projectList.selectedIndex = 0;
+  el.projectDialog.showModal();
+}
+
+async function openChosenProject() {
+  const name = el.projectList.value;
+  if (!name) return;
+  state.config.folder = projectsRootPath(name);
+  rememberProjectFolder(state.config.folder);
+  el.projectDialog.close();
+  await loadProject();
+}
+
+async function createProject() {
+  const raw = prompt("Name des neuen Buch-Uhr-Projekts:", "");
+  if (raw === null) return;
+  const name = raw.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, " ").replace(/\s+/g, " ").replace(/[. ]+$/g, "");
+  if (!name) return;
+
+  const folder = projectsRootPath(name);
+  try {
+    await graphItemByAbsolutePath(folder);
+    toast("Ein Projekt mit diesem Namen existiert bereits.", 5000);
+    return;
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+
+  await ensureFolderPath(folder);
+  state.config.folder = folder;
+  await ensureFolderPath(projectPath(FILES_DIR));
+  await ensureFolderPath(projectPath(REFERENCE_DIR));
+  await ensureFolderPath(projectPath(TRASH_DIR));
+  state.project = {
+    version: 2,
+    norm_pages: 381,
+    characters_per_page: CHARS_PER_PAGE,
+    background_color: "#17191f",
+    clock_color: "#f4f4f4",
+    progress_color: "#2e7df6",
+    zoom: 1,
+    center_x: 0,
+    center_y: 0,
+    view_initialized: false,
+    explorer_path: ".",
+    explorer_visible: true,
+    raster_titles: {},
+    reference_files: [],
+    title_color_rules: [],
+    documents: [],
+  };
+  const uploaded = await uploadByPath(PROJECT_FILE, JSON.stringify(state.project, null, 2), "application/json; charset=utf-8");
+  state.projectETag = uploaded?.eTag || "";
+  rememberProjectFolder(folder);
+  el.projectDialog.close();
+  await loadProject();
+}
+
+async function tryDownloadText(relative) {
+  try {
+    const { response } = await downloadByPath(relative);
+    return await response.text();
+  } catch {
+    return null;
+  }
+}
+
+async function migrateProjectToTextClockModel() {
+  if (!state.project) return { changed: false, unresolved: [] };
+
+  let changed = false;
+  const unresolved = [];
+
+  await ensureFolderPath(projectPath(FILES_DIR));
+  await ensureFolderPath(projectPath(REFERENCE_DIR));
+  await ensureFolderPath(projectPath(TRASH_DIR));
+
+  // Alte Uhrdokumente nach „Uhr/HH.MM Titel.txt“ überführen.
+  for (const doc of state.project.documents || []) {
+    const current = normalizeRelative(doc.project_path || "");
+    const alreadyNew = current.toLocaleLowerCase("de").startsWith(`${FILES_DIR.toLocaleLowerCase("de")}/`)
+      && suffix(current) === ".txt"
+      && /^\d{2}\.\d{2}\s+/.test(basenameAny(current));
+
+    if (alreadyNew) {
+      doc.source_type = "project_text";
+      doc.original_path = "";
+      doc.text_cache_path = current;
+      doc.suffix = ".txt";
+      doc.is_on_clock = true;
+      continue;
+    }
+
+    const candidates = [
+      normalizeRelative(doc.text_cache_path || ""),
+      current,
+    ].filter(Boolean);
+
+    let text = null;
+    let sourceRelative = "";
+    for (const candidate of candidates) {
+      const ext = suffix(candidate);
+      if (![".txt", ".md"].includes(ext)) continue;
+      text = await tryDownloadText(candidate);
+      if (text !== null) {
+        sourceRelative = candidate;
+        break;
+      }
+    }
+
+    if (text === null) {
+      unresolved.push(doc.title || basenameAny(current) || "Unbekannte Word-Datei");
+      continue;
+    }
+
+    const title = stripClockPrefix(doc.title || stem(basenameAny(current)));
+    const desired = await uniqueNameInFolder(FILES_DIR, clockFilename(title, doc.start_second || 0));
+    await uploadByPath(`${FILES_DIR}/${desired}`, text, "text/plain; charset=utf-8");
+
+    const oldPaths = new Set(candidates);
+    for (const oldRelative of oldPaths) {
+      if (!oldRelative || normalizeRelative(oldRelative).toLocaleLowerCase("de") === `${FILES_DIR}/${desired}`.toLocaleLowerCase("de")) continue;
+      try {
+        const oldItem = await getItemByPath(oldRelative);
+        await deleteDriveItem(oldItem);
+      } catch {}
+    }
+
+    doc.title = title;
+    doc.source_type = "project_text";
+    doc.original_path = "";
+    doc.project_path = `${FILES_DIR}/${desired}`;
+    doc.text_cache_path = doc.project_path;
+    doc.suffix = ".txt";
+    doc.is_on_clock = true;
+    doc.original_mtime_ns = 0;
+    doc.character_count = text.length;
+    changed = true;
+  }
+
+  // Alte Stehsatz-TXT/MD nach Stehsatz/*.txt überführen.
+  const migratedRefs = [];
+  for (const raw of state.project.reference_files || []) {
+    if (isReferenceSeparator(raw)) {
+      migratedRefs.push(raw);
+      continue;
+    }
+    const relative = normalizeRelative(raw);
+    const ext = suffix(relative);
+    if (ext === ".txt" && relative.toLocaleLowerCase("de").startsWith(`${REFERENCE_DIR.toLocaleLowerCase("de")}/`)) {
+      migratedRefs.push(relative);
+      continue;
+    }
+    if (![".txt", ".md"].includes(ext)) {
+      unresolved.push(stem(basenameAny(relative)));
+      migratedRefs.push(relative);
+      continue;
+    }
+
+    const content = await tryDownloadText(relative);
+    if (content === null) {
+      migratedRefs.push(relative);
+      continue;
+    }
+    const targetName = await uniqueNameInFolder(REFERENCE_DIR, `${safeProjectStem(stem(basenameAny(relative)))}.txt`);
+    await uploadByPath(`${REFERENCE_DIR}/${targetName}`, content, "text/plain; charset=utf-8");
+    try {
+      const oldItem = await getItemByPath(relative);
+      await deleteDriveItem(oldItem);
+    } catch {}
+    migratedRefs.push(`${REFERENCE_DIR}/${targetName}`);
+    changed = true;
+  }
+  state.project.reference_files = migratedRefs;
+
+  // Alte technische Cache-Dateien im Ordner „Dateien“ beseitigen.
+  try {
+    const legacyItems = await listFolderByRelative(LEGACY_FILES_DIR);
+    for (const item of legacyItems) {
+      if (item.file && item.name.startsWith(".") && item.name.endsWith(".cache.txt")) {
+        await deleteDriveItem(item);
+        changed = true;
+      }
+    }
+  } catch {}
+
+  return { changed, unresolved: [...new Set(unresolved)] };
+}
+
 async function loadProject() {
-  if (!state.config.folder) throw new Error("Bitte den OneDrive-Projektordner eintragen.");
+  if (!state.config.folder) throw new Error("Bitte zuerst ein Buch-Uhr-Projekt öffnen.");
   setStatus("Lade Projekt …", "syncing");
   const { item, response } = await downloadByPath(PROJECT_FILE);
   const project = await response.json();
   if (!Array.isArray(project.documents)) project.documents = [];
   if (!Array.isArray(project.reference_files)) project.reference_files = [];
+  if (!Array.isArray(project.title_color_rules)) project.title_color_rules = [];
   if (!project.raster_titles) project.raster_titles = {};
 
   state.project = project;
   state.projectItem = item;
   state.projectETag = item.eTag || "";
+
+  const migration = await migrateProjectToTextClockModel();
+  if (migration.changed) await saveProject();
+  if (migration.unresolved.length) {
+    toast(
+      "Einige alte DOCX-Dateien konnten auf dem iPad nicht in TXT umgewandelt werden. Bitte dieses Projekt einmal mit Buchuhr v70 unter Windows öffnen.",
+      9000
+    );
+  }
+
   state.history = [];
   state.future = [];
-  el.projectName.textContent = state.config.folder;
+  el.projectName.textContent = basenameAny(state.config.folder);
   el.emptyHint.classList.add("hidden");
   renderAll();
   await loadFolderFiles();
@@ -341,7 +866,11 @@ async function saveProject() {
   try {
     const uploaded = await uploadByPath(
       PROJECT_FILE,
-      JSON.stringify(state.project, null, 2),
+      JSON.stringify(
+        state.project,
+        (key, value) => key.startsWith("_") ? undefined : value,
+        2
+      ),
       "application/json; charset=utf-8",
       state.projectETag
     );
@@ -364,24 +893,33 @@ async function syncNow() {
   try {
     await signIn();
     await loadProject();
+    clearRememberedError();
   } catch (error) {
     console.error(error);
-    setStatus("Fehler", "error");
-    toast(error.message || String(error), 6000);
+    rememberError(error, "Synchronisierung fehlgeschlagen");
+    toast(error.message || String(error), 8000);
   }
 }
 
 async function loadFolderFiles() {
   const base = encodeGraphPath(projectPath());
   const rootResult = await graph(`/me/drive/root:/${base}:/children?$select=id,name,webUrl,file,folder,lastModifiedDateTime&$top=200`);
-  let items = rootResult.value || [];
+  let items = (rootResult.value || []).map(item => ({ ...item, _relative: item.name }));
 
-  try {
-    const filesPath = encodeGraphPath(projectPath(FILES_DIR));
-    const filesResult = await graph(`/me/drive/root:/${filesPath}:/children?$select=id,name,webUrl,file,folder,lastModifiedDateTime&$top=500`);
-    items = items.concat((filesResult.value || []).map(item => ({ ...item, _inFiles: true })));
-  } catch (error) {
-    console.warn("Dateien-Unterordner nicht lesbar", error);
+  for (const directory of [FILES_DIR, REFERENCE_DIR, TRASH_DIR]) {
+    try {
+      const dirPath = encodeGraphPath(projectPath(directory));
+      const dirResult = await graph(`/me/drive/root:/${dirPath}:/children?$select=id,name,webUrl,file,folder,lastModifiedDateTime&$top=500`);
+      items = items.concat((dirResult.value || []).map(item => ({
+        ...item,
+        _inFiles: directory === FILES_DIR,
+        _inReferences: directory === REFERENCE_DIR,
+        _inTrash: directory === TRASH_DIR,
+        _relative: `${directory}/${item.name}`,
+      })));
+    } catch (error) {
+      console.warn(`${directory}-Unterordner nicht lesbar`, error);
+    }
   }
 
   state.folderItems = items;
@@ -680,10 +1218,235 @@ async function activateSidebarFile(key, openEditor, previewFn) {
 }
 
 
+function normalizedTitleColorRules() {
+  return (state.project?.title_color_rules || [])
+    .filter(rule => rule && String(rule.word || "").trim() && /^#[0-9a-f]{6}$/i.test(String(rule.color || "")))
+    .map(rule => ({ word: String(rule.word).trim(), color: String(rule.color).toLowerCase() }));
+}
+
+function applyTitleColorMarkup(node, title) {
+  const source = String(title || "");
+  node.replaceChildren();
+  if (!source) return;
+
+  const assignments = Array(source.length).fill(null);
+  const folded = source.toLocaleLowerCase("de");
+
+  for (const rule of normalizedTitleColorRules()) {
+    const needle = rule.word.toLocaleLowerCase("de");
+    let start = 0;
+    while (needle && start < folded.length) {
+      const pos = folded.indexOf(needle, start);
+      if (pos < 0) break;
+      const end = Math.min(source.length, pos + rule.word.length);
+      for (let i = pos; i < end; i += 1) {
+        if (assignments[i] === null) assignments[i] = rule.color;
+      }
+      start = Math.max(pos + 1, end);
+    }
+  }
+
+  let runStart = 0;
+  let runColor = assignments[0] || null;
+  for (let i = 1; i <= source.length; i += 1) {
+    const color = i < source.length ? assignments[i] : Symbol("end");
+    if (i === source.length || color !== runColor) {
+      const span = document.createElement("span");
+      span.textContent = source.slice(runStart, i);
+      if (runColor) {
+        span.style.color = runColor;
+        span.style.fontWeight = "700";
+      }
+      node.append(span);
+      runStart = i;
+      runColor = i < source.length ? color : null;
+    }
+  }
+}
+
+
+function clockTitleColorAssignments(title) {
+  const source = String(title || "").trim();
+  const assignments = Array(source.length).fill(null);
+  const folded = source.toLocaleLowerCase("de");
+
+  for (const rule of normalizedTitleColorRules()) {
+    const needle = rule.word.toLocaleLowerCase("de");
+    let start = 0;
+    while (needle && start < folded.length) {
+      const pos = folded.indexOf(needle, start);
+      if (pos < 0) break;
+      const end = Math.min(source.length, pos + rule.word.length);
+      for (let i = pos; i < end; i += 1) {
+        if (assignments[i] === null) assignments[i] = rule.color;
+      }
+      start = Math.max(pos + 1, end);
+    }
+  }
+  return { source, assignments };
+}
+
+function splitClockTitleLines(title, maxWidth = 250, maxLines = 3) {
+  const source = String(title || "").trim();
+  if (!source) return [];
+
+  const words = [...source.matchAll(/\S+/g)].map(match => ({
+    text: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+  if (!words.length) return [];
+
+  const canvas = splitClockTitleLines._canvas || (splitClockTitleLines._canvas = document.createElement("canvas"));
+  const context = canvas.getContext("2d");
+  context.font = '500 15px system-ui, -apple-system, "Segoe UI", sans-serif';
+  const spaceWidth = context.measureText(" ").width;
+
+  const lines = [];
+  let current = [];
+  let width = 0;
+
+  for (const word of words) {
+    const wordWidth = context.measureText(word.text).width;
+    const nextWidth = current.length ? width + spaceWidth + wordWidth : wordWidth;
+    if (current.length && nextWidth > maxWidth) {
+      lines.push(current);
+      current = [word];
+      width = wordWidth;
+    } else {
+      current.push(word);
+      width = nextWidth;
+    }
+  }
+  if (current.length) lines.push(current);
+
+  if (lines.length <= maxLines) return lines;
+
+  const kept = lines.slice(0, maxLines);
+  const overflowWords = lines.slice(maxLines - 1).flat();
+  kept[maxLines - 1] = overflowWords;
+  return kept;
+}
+
+function appendColoredClockWord(textNode, source, assignments, word, addSpace) {
+  if (addSpace) {
+    const space = svg("tspan", {}, " ");
+    textNode.append(space);
+  }
+
+  let runStart = word.start;
+  let runColor = assignments[word.start] || null;
+  for (let i = word.start + 1; i <= word.end; i += 1) {
+    const color = i < word.end ? assignments[i] : Symbol("end");
+    if (i === word.end || color !== runColor) {
+      const attrs = {};
+      if (runColor) {
+        attrs.fill = runColor;
+        attrs["font-weight"] = "700";
+      }
+      textNode.append(svg("tspan", attrs, source.slice(runStart, i)));
+      runStart = i;
+      runColor = i < word.end ? color : null;
+    }
+  }
+}
+
+function createClockTitleGroup(title, horizontal, vertical, baseColor) {
+  const { source, assignments } = clockTitleColorAssignments(title);
+  const lines = splitClockTitleLines(source, 250, 3);
+  const group = svg("g", { class: "doc-title-svg-group" });
+  if (!lines.length) return group;
+
+  const centered = Math.abs(horizontal) < 0.28;
+  const lineHeight = 18;
+  const totalHeight = (lines.length - 1) * lineHeight;
+  let x = 0;
+  let firstY = -totalHeight / 2 + 5;
+  let anchor = "middle";
+
+  if (centered) {
+    // Oben und unten liegen Titel radial außerhalb des Symbols statt darüber.
+    firstY = vertical < 0
+      ? -34 - totalHeight
+      : 45;
+  } else if (horizontal > 0) {
+    x = 30;
+    anchor = "start";
+  } else {
+    x = -30;
+    anchor = "end";
+  }
+
+  lines.forEach((words, lineIndex) => {
+    const text = svg("text", {
+      x,
+      y: firstY + lineIndex * lineHeight,
+      class: "doc-title-svg",
+      fill: baseColor,
+      "text-anchor": anchor,
+      "dominant-baseline": "middle",
+    });
+    words.forEach((word, wordIndex) => {
+      appendColoredClockWord(text, source, assignments, word, wordIndex > 0);
+    });
+    group.append(text);
+  });
+
+  return group;
+}
+
+function renderTitleColorRulesEditor() {
+  el.titleColorRows.replaceChildren();
+  const rules = normalizedTitleColorRules();
+  if (!rules.length) rules.push({ word: "", color: "#f4f4f4" });
+  for (const rule of rules) addTitleColorRuleRow(rule.word, rule.color);
+}
+
+function addTitleColorRuleRow(word = "", color = "#f4f4f4") {
+  const row = document.createElement("div");
+  row.className = "title-color-row";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "title-color-word";
+  input.placeholder = "Wort im Dateinamen";
+  input.value = word;
+
+  const picker = document.createElement("input");
+  picker.type = "color";
+  picker.className = "title-color-picker";
+  picker.value = /^#[0-9a-f]{6}$/i.test(color) ? color : "#f4f4f4";
+
+  row.append(input, picker);
+  el.titleColorRows.append(row);
+  input.focus();
+}
+
+function openTitleColorDialog() {
+  if (!state.project) return;
+  renderTitleColorRulesEditor();
+  el.titleColorDialog.showModal();
+}
+
+async function saveTitleColorRules() {
+  if (!state.project) return;
+  const rules = [...el.titleColorRows.querySelectorAll(".title-color-row")]
+    .map(row => ({
+      word: row.querySelector(".title-color-word")?.value.trim() || "",
+      color: row.querySelector(".title-color-picker")?.value || "#f4f4f4",
+    }))
+    .filter(rule => rule.word);
+
+  pushHistory();
+  state.project.title_color_rules = rules;
+  await saveProject();
+  el.titleColorDialog.close();
+  renderDocuments();
+  renderReferenceList();
+  toast("Titelfarben gespeichert");
+}
+
 function fileIconClass(name) {
-  const ext = suffix(name);
-  if (ext === ".docx") return ["W", "word"];
-  if (ext === ".md") return ["MD", "md"];
   return ["≡", "text"];
 }
 
@@ -692,8 +1455,13 @@ function makeFileRow(item) {
   row.className = `file-row ${item.id === state.selectedFileId ? "selected" : ""}`;
   row.dataset.fileItemId = item.id || "";
   const [label, cls] = fileIconClass(item.name);
-  row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
-  row.querySelector(".file-name").textContent = item.folder ? item.name : stem(item.name);
+  const iconLabel = item.folder && item.name === TRASH_DIR ? "🗑" : label;
+  row.innerHTML = `<span class="file-icon ${cls}">${iconLabel}</span><span class="file-name"></span>`;
+  const displayName = item.folder ? item.name : stem(item.name);
+  const prefix = item._inFiles ? "Uhr › " : item._inReferences ? "Stehsatz › " : item._inTrash ? "Papierkorb › " : "";
+  row.querySelector(".file-name").textContent = `${prefix}${displayName}`;
+  if (item._inTrash) row.classList.add("in-trash");
+  row.dataset.fileRelative = item._relative || item.name;
 
   const matchingDoc = () => findDocByName(item.name);
 
@@ -749,6 +1517,7 @@ function renderFileList() {
   el.fileList.replaceChildren();
   const items = [...state.folderItems]
     .filter(item => item.name !== PROJECT_FILE)
+    .filter(item => item.folder || suffix(item.name) === ".txt")
     .sort((a, b) => Number(Boolean(b.folder)) - Number(Boolean(a.folder)) || a.name.localeCompare(b.name, "de"));
 
   for (const item of items) {
@@ -930,10 +1699,11 @@ function renderDocuments() {
   if (!state.project) return;
 
   for (const doc of state.project.documents.filter(d => d.is_on_clock !== false)) {
-    const p = polar(Number(doc.start_second || 0), 520);
-    const right = Math.cos(p.angle) >= 0;
-    const boxWidth = 230;
-    const boxHeight = 58;
+    const p = polar(Number(doc.start_second || 0), 430);
+    const horizontal = Math.cos(p.angle);
+    const vertical = Math.sin(p.angle);
+    const right = horizontal >= 0;
+    const boxWidth = 250;
     const boxX = right ? 30 : -30 - boxWidth;
 
     const g = svg("g", {
@@ -962,18 +1732,14 @@ function renderDocuments() {
     icon.append(svg("text", { x: 0, y: 1 }, label));
     g.append(icon);
 
-    const foreign = svg("foreignObject", {
-      x: boxX,
-      y: -boxHeight / 2,
-      width: boxWidth,
-      height: boxHeight,
-      class: "doc-title-box",
-    });
-    const div = document.createElement("div");
-    div.className = `doc-title-html ${right ? "right" : "left"}`;
-    div.textContent = doc.title || stem(basenameAny(doc.project_path));
-    foreign.append(div);
-    g.append(foreign);
+    // Native SVG-Titel statt foreignObject/HTML. Das verhindert die fehlerhafte
+    // Wort- und Zeichenverteilung in Firefox/Safari bei skaliertem SVG.
+    g.append(createClockTitleGroup(
+      doc.title || stem(basenameAny(doc.project_path)),
+      horizontal,
+      vertical,
+      state.project.clock_color || "#f4f4f4",
+    ));
 
     g.addEventListener("pointerdown", event => {
       beginCanvasFilePointer(event, doc, g, "document");
@@ -1361,6 +2127,25 @@ window.addEventListener("pointermove", event => {
   }
 }, true);
 
+function pointInside(element, x, y) {
+  const rect = element.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function canvasDropDestination(x, y) {
+  if (pointInside(el.rightPanel, x, y)) return REFERENCE_DIR;
+  if (pointInside(el.leftPanel, x, y)) {
+    const target = document.elementFromPoint(x, y)?.closest?.(".file-row");
+    if (target) {
+      const item = state.folderItems.find(entry => entry.id === target.dataset.fileItemId);
+      if (item?.folder && [REFERENCE_DIR, TRASH_DIR].includes(item.name)) return item.name;
+      if (item?.folder && item.name === FILES_DIR) return FILES_DIR;
+    }
+    return "";
+  }
+  return null;
+}
+
 window.addEventListener("pointerup", async event => {
   const action = state.pointerAction;
   if (!action || action.pointerId !== event.pointerId) return;
@@ -1370,7 +2155,26 @@ window.addEventListener("pointerup", async event => {
 
   if (finished.kind === "file") {
     if (finished.moved) {
-      await saveProject().catch(error => toast(error.message, 6000));
+      const destination = canvasDropDestination(event.clientX, event.clientY);
+      try {
+        if (destination !== null && destination !== FILES_DIR) {
+          finished.doc.start_second = finished.originalSecond;
+          await moveClockDocToFolder(finished.doc, destination);
+          toast(destination === REFERENCE_DIR ? "Datei in den Stehsatz verschoben" :
+                destination === TRASH_DIR ? "Datei in den Papierkorb verschoben" :
+                "Datei ins Projekt-Root verschoben");
+        } else {
+          await renameClockDocForState(finished.doc, finished.doc.title, finished.doc.start_second);
+          await saveProject();
+          await loadFolderFiles();
+          renderAll();
+        }
+      } catch (error) {
+        finished.doc.start_second = finished.originalSecond;
+        renderProgress();
+        renderDocuments();
+        toast(error.message || String(error), 6000);
+      }
     } else {
       finished.doc.start_second = finished.originalSecond;
       await activateCanvasFile(finished.doc);
@@ -1414,6 +2218,27 @@ function isReferenceSeparator(raw) {
 
 function separatorTitle(raw) {
   return String(raw || "").slice(SEPARATOR_PREFIX.length);
+}
+
+async function createReferenceTextFile() {
+  if (!state.project) return;
+  try {
+    pushHistory();
+    const name = await uniqueNameInFolder(REFERENCE_DIR, "Neue Textdatei.txt");
+    await uploadByPath(`${REFERENCE_DIR}/${name}`, "", "text/plain; charset=utf-8");
+    state.project.reference_files ||= [];
+    const raw = `${REFERENCE_DIR}/${name}`;
+    state.project.reference_files.push(raw);
+    state.selectedReferencePath = raw;
+    state.selectedFileId = null;
+    state.selectedDocId = null;
+    await saveProject();
+    await loadFolderFiles();
+    renderReferenceList();
+    openActionDialog("renameReference", "Stehsatzdatei umbenennen", stem(name));
+  } catch (error) {
+    toast(error.message || String(error), 6000);
+  }
 }
 
 async function createReferenceSeparator() {
@@ -1537,19 +2362,49 @@ async function removeReferenceEntry(raw) {
   if (index < 0) return;
 
   pushHistory();
+
+  if (!isReferenceSeparator(raw)) {
+    try {
+      const item = findReferenceItem(raw) || await getItemByPath(normalizeRelative(raw));
+      await moveDriveItem(item, "", plainFilename(stem(item.name)));
+    } catch (error) {
+      toast(error.message || String(error), 6000);
+      return;
+    }
+  }
+
   state.project.reference_files.splice(index, 1);
   if (state.selectedReferencePath === raw) state.selectedReferencePath = null;
   clearSidePreviews();
   await saveProject();
+  await loadFolderFiles();
   renderReferenceList();
   updateSelectionVisuals();
-  toast("Aus dem Stehsatz entfernt");
+  toast(isReferenceSeparator(raw) ? "Trennlinie entfernt" : "Datei ins Projekt-Root verschoben");
 }
 
-async function deleteLeftFile(item) {
-  if (!item?.id || item.folder) return;
+async function trashFolderItem() {
+  await ensureFolderPath(projectPath(TRASH_DIR));
+  return graphItemByAbsolutePath(projectPath(TRASH_DIR));
+}
 
-  try {
+async function uniqueTrashName(name) {
+  const base = encodeGraphPath(projectPath(TRASH_DIR));
+  const result = await graph(`/me/drive/root:/${base}:/children?$select=name&$top=500`);
+  const used = new Set((result.value || []).map(entry => String(entry.name || "").toLocaleLowerCase("de")));
+  if (!used.has(name.toLocaleLowerCase("de"))) return name;
+
+  const dot = name.lastIndexOf(".");
+  const stemName = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let number = 2;
+  while (used.has(`${stemName} (${number})${ext}`.toLocaleLowerCase("de"))) number += 1;
+  return `${stemName} (${number})${ext}`;
+}
+
+async function moveItemToProjectTrash(item) {
+  if (!item?.id) throw new Error("Datei kann nicht in den Papierkorb verschoben werden.");
+  if (item._inTrash) {
     const accessToken = await token();
     const response = await fetch(`${GRAPH_BASE}/me/drive/items/${item.id}`, {
       method: "DELETE",
@@ -1557,22 +2412,56 @@ async function deleteLeftFile(item) {
     });
     if (!response.ok && response.status !== 204) {
       const body = await response.text();
-      throw new Error(`Datei konnte nicht gelöscht werden.\n${response.status} ${response.statusText}\n${body}`);
+      throw new Error(`Datei konnte nicht endgültig gelöscht werden.\n${response.status} ${response.statusText}\n${body}`);
+    }
+    return;
+  }
+
+  const trash = await trashFolderItem();
+  const name = await uniqueTrashName(item.name);
+  await graph(`/me/drive/items/${item.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parentReference: { id: trash.id }, name }),
+  });
+}
+
+async function deleteLeftFile(item) {
+  if (!item?.id || item.folder) return;
+
+  try {
+    const docMatches = (state.project?.documents || []).filter(doc =>
+      basenameAny(doc.project_path).toLocaleLowerCase("de") === item.name.toLocaleLowerCase("de")
+    );
+    const referenceMatches = (state.project?.reference_files || []).filter(raw =>
+      !isReferenceSeparator(raw) && basenameAny(raw).toLocaleLowerCase("de") === item.name.toLocaleLowerCase("de")
+    );
+
+    if (docMatches.length && !item._inTrash) {
+      for (const doc of docMatches) await moveClockDocToFolder(doc, TRASH_DIR);
+    } else {
+      await moveItemToProjectTrash(item);
     }
 
-    const doc = findDocByName(item.name);
-    if (doc && state.project) {
-      pushHistory();
-      state.project.documents = state.project.documents.filter(entry => entry.id !== doc.id);
-      if (state.selectedDocId === doc.id) state.selectedDocId = null;
-      await saveProject();
+    if (state.project) {
+      if (docMatches.length) {
+        const ids = new Set(docMatches.map(doc => doc.id));
+        state.project.documents = state.project.documents.filter(doc => !ids.has(doc.id));
+        if (state.selectedDocId && ids.has(state.selectedDocId)) state.selectedDocId = null;
+      }
+      if (referenceMatches.length) {
+        const removed = new Set(referenceMatches);
+        state.project.reference_files = state.project.reference_files.filter(raw => !removed.has(raw));
+        if (state.selectedReferencePath && removed.has(state.selectedReferencePath)) state.selectedReferencePath = null;
+      }
+      if (docMatches.length || referenceMatches.length) await saveProject();
     }
 
     if (state.selectedFileId === item.id) state.selectedFileId = null;
     clearSidePreviews();
     await loadFolderFiles();
     renderAll();
-    toast("Datei gelöscht");
+    toast(item._inTrash ? "Datei endgültig gelöscht" : "Datei in den Projekt-Papierkorb verschoben");
   } catch (error) {
     toast(error.message || String(error), 6000);
     renderFileList();
@@ -1767,7 +2656,7 @@ function renderReferenceList() {
       const name = basenameAny(raw);
       const [label, cls] = fileIconClass(name);
       row.innerHTML = `<span class="file-icon ${cls}">${label}</span><span class="file-name"></span>`;
-      row.querySelector(".file-name").textContent = stem(name);
+      applyTitleColorMarkup(row.querySelector(".file-name"), stem(name));
       row.dataset.referencePath = raw;
 
       if (state.selectedReferencePath === raw) row.classList.add("selected");
@@ -1832,7 +2721,7 @@ async function searchExactFile(name) {
 async function openReference(raw) {
   try {
     const name = basenameAny(raw);
-    const item = await searchExactFile(name);
+    const item = findReferenceItem(raw) || await searchExactFile(name);
     if (!item) throw new Error(`Datei in OneDrive nicht gefunden: ${name}`);
     if (item.webUrl) window.open(item.webUrl, "_blank", "noopener");
   } catch (error) {
@@ -1850,9 +2739,12 @@ function findDocByName(name) {
 }
 
 function findReferenceItem(raw) {
-  const name = basenameAny(raw);
-  return state.folderItems.find(
-    item => item.name?.toLocaleLowerCase("de") === name.toLocaleLowerCase("de")
+  const relative = normalizeRelative(raw).toLocaleLowerCase("de");
+  const name = basenameAny(raw).toLocaleLowerCase("de");
+  return state.folderItems.find(item =>
+    String(item._relative || "").toLocaleLowerCase("de") === relative
+  ) || state.folderItems.find(item =>
+    item.name?.toLocaleLowerCase("de") === name
   ) || null;
 }
 
@@ -2004,8 +2896,14 @@ function hideContextMenu() {
 function showContextMenu(x, y, doc = null) {
   if (doc) selectDoc(doc);
   const hasDoc = Boolean(selectedDoc());
+  const hasReference = Boolean(state.selectedReferencePath && !isReferenceSeparator(state.selectedReferencePath));
   for (const button of el.contextMenu.querySelectorAll("button")) {
-    button.classList.toggle("hidden", ["open","rename","remove"].includes(button.dataset.action) && !hasDoc);
+    const action = button.dataset.action;
+    let hidden = false;
+    if (["open", "rename"].includes(action)) hidden = !(hasDoc || hasReference);
+    if (action === "remove") hidden = !hasDoc;
+    if (action === "titleColors") hidden = !(hasDoc || hasReference);
+    button.classList.toggle("hidden", hidden);
   }
   el.contextMenu.style.left = `${Math.min(x, innerWidth-240)}px`;
   el.contextMenu.style.top = `${Math.min(y, innerHeight-340)}px`;
@@ -2052,12 +2950,15 @@ function renameSelected() {
 
 async function removeSelected() {
   const doc = selectedDoc();
-  if (!doc || !confirm(`„${doc.title}“ von der Uhr entfernen?`)) return;
+  if (!doc || !confirm(`„${doc.title}“ in den Papierkorb verschieben?`)) return;
   pushHistory();
-  doc.is_on_clock = false;
-  state.selectedDocId = null;
-  await saveProject();
-  renderAll();
+  try {
+    await moveClockDocToFolder(doc, TRASH_DIR);
+    clearSidePreviews();
+    toast("Datei in den Projekt-Papierkorb verschoben");
+  } catch (error) {
+    toast(error.message || String(error), 6000);
+  }
 }
 
 function editRasterTitle(second = 0) {
@@ -2081,14 +2982,18 @@ async function saveActionDialog() {
   if (state.actionMode === "rename") {
     const doc = selectedDoc();
     const title = el.actionDialogInput.value.trim();
-    if (doc && title) doc.title = title;
+    if (doc && title) {
+      await renameClockDocForState(doc, title, doc.start_second);
+    }
   } else if (state.actionMode === "renameReference") {
     const title = el.actionDialogInput.value.trim();
     if (title && state.selectedReferencePath) {
-      const raw = state.selectedReferencePath;
-      const ext = suffix(basenameAny(raw));
-      const updated = raw.replace(/[^\\/]+$/, `${title}${ext}`);
-      const index = state.project.reference_files.indexOf(raw);
+      const raw = normalizeRelative(state.selectedReferencePath);
+      const item = findReferenceItem(raw) || await getItemByPath(raw);
+      const newName = await uniqueNameInFolder(REFERENCE_DIR, `${safeProjectStem(title)}.txt`, item.id);
+      const moved = await moveDriveItem(item, REFERENCE_DIR, newName);
+      const updated = `${REFERENCE_DIR}/${moved.name}`;
+      const index = state.project.reference_files.indexOf(state.selectedReferencePath);
       if (index >= 0) state.project.reference_files[index] = updated;
       state.selectedReferencePath = updated;
     }
@@ -2118,17 +3023,17 @@ async function saveActionDialog() {
     const typedTitle = el.newTextTitleInput.value.trim();
     const title = (typedTitle || text.split(/\n/)[0].trim() || "Neue Textdatei").slice(0, 80);
     const safe = title.replace(/[<>:"/\\|?*]/g, "_");
-    const filename = `00_00 – ${safe}.txt`;
+    const filename = `00.00 ${safe}.txt`;
     await uploadByPath(`${FILES_DIR}/${filename}`, text + "\n", "text/plain; charset=utf-8");
     state.project.documents.push({
       id: crypto.randomUUID().replaceAll("-",""),
       title,
-      source_type: "dragged_text",
+      source_type: "project_text",
       original_path: "",
-      project_path: filename,
+      project_path: `${FILES_DIR}/${filename}`,
       start_second: 0,
       character_count: text.length,
-      text_cache_path: filename,
+      text_cache_path: `${FILES_DIR}/${filename}`,
       suffix: ".txt",
       is_on_clock: true,
       original_mtime_ns: 0
@@ -2163,7 +3068,7 @@ async function openDocumentEditor(doc) {
   state.editorDoc = doc;
   el.editorTitle.textContent = doc.title || stem(basenameAny(doc.project_path));
   el.editorMeta.textContent = `${Number(doc.character_count || 0).toLocaleString("de-DE")} Zeichen`;
-  const editable = [".txt", ".md"].includes(String(doc.suffix).toLowerCase()) || doc.source_type === "dragged_text";
+  const editable = true;
   el.editorText.classList.toggle("hidden", !editable);
   el.docxMessage.classList.toggle("hidden", editable);
   el.saveEditorBtn.classList.toggle("hidden", !editable);
@@ -2242,7 +3147,7 @@ function toggleSidebars() {
 function openSettings() {
   el.clientIdInput.value = state.config.clientId;
   el.tenantInput.value = state.config.tenant;
-  el.folderInput.value = state.config.folder;
+  el.folderInput.value = state.config.root;
   el.settingsDialog.showModal();
 }
 
@@ -2250,14 +3155,22 @@ async function saveSettings(event) {
   event.preventDefault();
   state.config.clientId = el.clientIdInput.value.trim();
   state.config.tenant = el.tenantInput.value.trim() || "common";
-  state.config.folder = el.folderInput.value.trim().replace(/^\/+|\/+$/g, "");
+  state.config.root = normalizeConfiguredPath(el.folderInput.value) || "Buch-Uhr";
+  state.config.folder = "";
   localStorage.setItem("buchuhr.clientId", state.config.clientId);
   localStorage.setItem("buchuhr.tenant", state.config.tenant);
-  localStorage.setItem("buchuhr.folder", state.config.folder);
+  localStorage.setItem("buchuhr.root", state.config.root);
   state.msal = null;
   state.account = null;
+  clearRememberedError();
   el.settingsDialog.close();
-  await syncNow();
+  try {
+    await showProjectChooser();
+  } catch (error) {
+    console.error(error);
+    rememberError(error, "Verbindung nach dem Speichern der Einstellungen fehlgeschlagen");
+    toast("Verbindung fehlgeschlagen – auf „Fehler“ klicken für Details.", 8000);
+  }
 }
 
 // iPad: Browser-Zoom außerhalb des Canvas unterbinden.
@@ -2294,6 +3207,8 @@ el.fileList.addEventListener('pointerup', event => {
   registerSidebarBlankTap('left');
 }, true);
 
+el.referenceAddBtn.addEventListener("click", () => createReferenceTextFile());
+
 el.referenceList.addEventListener("dblclick", event => {
   if (event.target.closest(".reference-row")) return;
   event.preventDefault();
@@ -2318,6 +3233,8 @@ el.zoomOutBtn.addEventListener("click", () => zoomBy(.86));
 el.zoomInBtn.addEventListener("click", () => zoomBy(1.16));
 el.fitBtn.addEventListener("click", fitClock);
 el.actionDialogSaveBtn.addEventListener("click", saveActionDialog);
+el.titleColorPlus.addEventListener("click", () => addTitleColorRuleRow("", "#f4f4f4"));
+el.titleColorSave.addEventListener("click", () => saveTitleColorRules().catch(error => toast(error.message || String(error), 6000)));
 
 el.contextMenu.addEventListener("click", async event => {
   const action = event.target.closest("button")?.dataset.action;
@@ -2331,6 +3248,7 @@ el.contextMenu.addEventListener("click", async event => {
   else if (action === "raster") editRasterTitle(0);
   else if (action === "norm") editNormPages();
   else if (action === "colors") editColors();
+  else if (action === "titleColors") openTitleColorDialog();
   else if (action === "fit") fitClock();
 });
 document.addEventListener("pointerdown", event => {
@@ -2339,6 +3257,11 @@ document.addEventListener("pointerdown", event => {
 
 el.sidebarToggle.addEventListener("click", toggleSidebars);
 el.settingsBtn.addEventListener("click", openSettings);
+el.syncStatus.addEventListener("click", showErrorDetails);
+el.errorDetailsClose.addEventListener("click", () => el.errorDialog.close());
+el.projectsBtn.addEventListener("click", () => showProjectChooser().catch(error => toast(error.message || String(error), 6000)));
+el.openProjectBtn.addEventListener("click", () => openChosenProject().catch(error => toast(error.message || String(error), 6000)));
+el.newProjectBtn.addEventListener("click", () => createProject().catch(error => toast(error.message || String(error), 6000)));
 el.syncBtn.addEventListener("click", syncNow);
 el.refreshFilesBtn.addEventListener("click", loadFolderFiles);
 el.undoBtn.addEventListener("click", undo);
@@ -2395,10 +3318,11 @@ if ("serviceWorker" in navigator) {
 }
 
 async function startApp() {
-  if (state.config.clientId && state.config.folder) {
+  if (state.config.clientId) {
     try {
       await ensureMsal();
-      await syncNow();
+      await signIn();
+      await showProjectChooser();
     } catch (error) {
       console.error(error);
       if (isInteractionInProgress(error)) {
@@ -2409,8 +3333,8 @@ async function startApp() {
         setTimeout(() => location.replace(location.origin + location.pathname), 600);
         return;
       }
-      setStatus("Fehler", "error");
-      toast(error.message || String(error), 8000);
+      rememberError(error, "Start/OneDrive-Verbindung fehlgeschlagen");
+      toast("Verbindung fehlgeschlagen – auf „Fehler“ klicken für Details.", 8000);
     }
   } else {
     el.emptyHint.classList.remove("hidden");
