@@ -22,6 +22,13 @@ const state = {
   projectETag: "",
   projectItem: null,
   folderItems: [],
+  expandedExplorerFolders: (() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("buchuhr.explorerFolders") || "[]"));
+    } catch {
+      return new Set();
+    }
+  })(),
   history: [],
   future: [],
   selectedDocId: null,
@@ -1450,18 +1457,56 @@ function fileIconClass(name) {
   return ["≡", "text"];
 }
 
-function makeFileRow(item) {
+function explorerFolderForItem(item) {
+  if (item._inFiles) return FILES_DIR;
+  if (item._inReferences) return REFERENCE_DIR;
+  if (item._inTrash) return TRASH_DIR;
+  return "";
+}
+
+function isExplorerFolderExpanded(name) {
+  return state.expandedExplorerFolders.has(name);
+}
+
+function setExplorerFolderExpanded(name, expanded) {
+  if (expanded) state.expandedExplorerFolders.add(name);
+  else state.expandedExplorerFolders.delete(name);
+  localStorage.setItem(
+    "buchuhr.explorerFolders",
+    JSON.stringify([...state.expandedExplorerFolders])
+  );
+  renderFileList();
+}
+
+function makeFileRow(item, nested = false) {
   const row = document.createElement("div");
   row.className = `file-row ${item.id === state.selectedFileId ? "selected" : ""}`;
+  if (nested) row.classList.add("explorer-child");
   row.dataset.fileItemId = item.id || "";
+
   const [label, cls] = fileIconClass(item.name);
-  const iconLabel = item.folder && item.name === TRASH_DIR ? "🗑" : label;
+  const expanded = item.folder && isExplorerFolderExpanded(item.name);
+  const iconLabel = item.folder ? (expanded ? "▾" : "▸") : label;
   row.innerHTML = `<span class="file-icon ${cls}">${iconLabel}</span><span class="file-name"></span>`;
   const displayName = item.folder ? item.name : stem(item.name);
-  const prefix = item._inFiles ? "Uhr › " : item._inReferences ? "Stehsatz › " : item._inTrash ? "Papierkorb › " : "";
-  row.querySelector(".file-name").textContent = `${prefix}${displayName}`;
+  row.querySelector(".file-name").textContent = displayName;
   if (item._inTrash) row.classList.add("in-trash");
+  if (item.folder) row.classList.add("explorer-folder");
   row.dataset.fileRelative = item._relative || item.name;
+
+  if (item.folder) {
+    row.setAttribute("aria-expanded", expanded ? "true" : "false");
+    row.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setExplorerFolderExpanded(item.name, !isExplorerFolderExpanded(item.name));
+    });
+    row.addEventListener("dblclick", event => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    return row;
+  }
 
   const matchingDoc = () => findDocByName(item.name);
 
@@ -1504,24 +1549,39 @@ function makeFileRow(item) {
     showContextMenu(event.clientX, event.clientY, doc);
   });
 
-  if (!item.folder) {
-    attachSwipeRemoval(row, "right", async () => {
-      await deleteLeftFile(item);
-    });
-  }
+  attachSwipeRemoval(row, "right", async () => {
+    await deleteLeftFile(item);
+  });
 
   return row;
 }
 
 function renderFileList() {
   el.fileList.replaceChildren();
-  const items = [...state.folderItems]
-    .filter(item => item.name !== PROJECT_FILE)
-    .filter(item => item.folder || suffix(item.name) === ".txt")
-    .sort((a, b) => Number(Boolean(b.folder)) - Number(Boolean(a.folder)) || a.name.localeCompare(b.name, "de"));
 
-  for (const item of items) {
+  const visibleItems = [...state.folderItems]
+    .filter(item => item.name !== PROJECT_FILE)
+    .filter(item => item.folder || suffix(item.name) === ".txt");
+
+  const rootItems = visibleItems
+    .filter(item => !explorerFolderForItem(item))
+    .sort((a, b) =>
+      Number(Boolean(b.folder)) - Number(Boolean(a.folder))
+      || a.name.localeCompare(b.name, "de")
+    );
+
+  for (const item of rootItems) {
     el.fileList.append(makeFileRow(item));
+
+    if (!item.folder || !isExplorerFolderExpanded(item.name)) continue;
+
+    const children = visibleItems
+      .filter(child => explorerFolderForItem(child) === item.name)
+      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+    for (const child of children) {
+      el.fileList.append(makeFileRow(child, true));
+    }
   }
 }
 
