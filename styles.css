@@ -53,6 +53,8 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .file-icon.word { background: #185abd; color: white; border: 0; }
 .file-icon.md { background: #4b5563; }
 .file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row.explorer-folder { cursor: pointer; font-weight: 600; }
+.file-row.explorer-child { padding-left: 30px; }
 
 .reference-row.separator { justify-content: center; font-style: italic; color: #d9dce3; cursor: default; }
 
