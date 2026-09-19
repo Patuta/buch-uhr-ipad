@@ -1,0 +1,511 @@
+:root {
+  color-scheme: dark;
+  --bg: #17191f;
+  --panel: #20232b;
+  --panel2: #12141a;
+  --text: #f2f2f2;
+  --muted: #a9adb8;
+  --line: #3b3f4a;
+  --accent: #2e7df6;
+  --danger: #d14d4d;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input, textarea { font: inherit; }
+button { border: 1px solid var(--line); background: #2a2e38; color: var(--text); border-radius: 7px; padding: 7px 11px; }
+button:active { transform: translateY(1px); }
+button.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 600; }
+.icon-button { min-width: 38px; height: 38px; padding: 0; font-size: 20px; }
+
+.topbar {
+  touch-action: manipulation;
+  height: calc(54px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 10px 0;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: #14161c;
+}
+.brand { display: flex; flex-direction: column; min-width: 120px; margin-right: auto; }
+.brand span { font-size: 12px; color: var(--muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { font-size: 12px; padding: 5px 8px; border-radius: 999px; background: #30343e; }
+.status.online { background: #194e32; }
+.status.syncing { background: #5b4511; }
+.status.error { background: #682525; }
+
+.layout { height: calc(100% - 54px - env(safe-area-inset-top)); display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; }
+.layout:not(.sidebars-visible) { grid-template-columns: 0 minmax(0, 1fr) 0; }
+.layout:not(.sidebars-visible) .sidebar { display: none; }
+
+.sidebar { background: var(--panel); overflow: hidden; display: flex; flex-direction: column; border-color: var(--line); touch-action: manipulation; }
+.sidebar.left { border-right: 1px solid var(--line); }
+.sidebar.right { border-left: 1px solid var(--line); }
+.sidebar h2 { font-size: 15px; margin: 12px; }
+.sidebar-actions { padding: 0 10px 8px; }
+.file-list, .reference-list { overflow: auto; flex: 1; padding: 4px; -webkit-overflow-scrolling: touch; }
+
+.file-row, .reference-row {
+  min-height: 38px; display: flex; align-items: center; gap: 8px;
+  padding: 7px 8px; border-radius: 5px; user-select: none;
+}
+.file-row:active, .reference-row.selected { background: #315ea7; }
+.file-icon { width: 25px; height: 25px; border: 1px solid #c8ccd5; border-radius: 4px; display: grid; place-items: center; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
+.file-icon.word { background: #185abd; color: white; border: 0; }
+.file-icon.md { background: #4b5563; }
+.file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.reference-row.separator { justify-content: center; font-style: italic; color: #d9dce3; cursor: default; }
+
+.canvas-wrap { min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
+.clock-canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+.empty-hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+.hidden { display: none !important; }
+
+.clock-outline { fill: none; stroke-width: 4; vector-effect: non-scaling-stroke; }
+.tick { vector-effect: non-scaling-stroke; stroke-linecap: square; }
+.progress-arc { fill: none; stroke-linecap: butt; stroke-width: 10; vector-effect: non-scaling-stroke; cursor: grab; }
+.progress-arc.dragging { cursor: grabbing; stroke-width: 14; }
+.doc-node { cursor: pointer; touch-action: none; }
+.doc-title { font-size: 18px; dominant-baseline: middle; fill: var(--text); }
+.doc-icon rect { fill: #20232b; stroke: var(--text); stroke-width: 2; }
+.doc-icon text { font-size: 15px; font-weight: 700; fill: white; text-anchor: middle; dominant-baseline: middle; }
+.doc-icon.word rect { fill: #185abd; stroke: none; }
+.doc-icon.md rect { fill: #4b5563; }
+.raster-title { text-anchor: middle; dominant-baseline: middle; font-size: 17px; fill: var(--text); }
+.raster-title.major { font-weight: 700; font-size: 19px; }
+.connector { stroke: #c8ccd5; stroke-opacity: .45; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; width: min(620px, calc(100vw - 24px)); padding: 0; }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog form { padding: 18px; }
+dialog h2 { margin-top: 0; }
+dialog label { display: block; margin: 12px 0; color: var(--muted); }
+dialog input, dialog textarea { width: 100%; background: #101218; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin-top: 5px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.help { color: var(--muted); font-size: 13px; }
+
+.editor-dialog { width: min(900px, calc(100vw - 18px)); height: min(760px, calc(100vh - 30px)); }
+.editor-dialog form { height: 100%; padding: 12px; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+.editor-dialog header, .editor-dialog footer { display: flex; align-items: center; gap: 8px; }
+.editor-dialog header h2 { margin: 0; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-dialog textarea { resize: none; height: 100%; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 1.45; }
+.editor-dialog footer span { margin-right: auto; color: var(--muted); }
+.docx-message { display: grid; place-items: center; color: var(--muted); font-size: 18px; text-align: center; }
+
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: min(620px, calc(100vw - 24px)); background: #0e1015; border: 1px solid var(--line); padding: 10px 14px; border-radius: 9px; box-shadow: 0 8px 30px rgba(0,0,0,.4); z-index: 50; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 250px minmax(0, 1fr) 250px; }
+  .status { display: none; }
+  .topbar { gap: 5px; }
+  .brand span { max-width: 150px; }
+}
+@media (max-width: 700px) {
+  .layout.sidebars-visible { grid-template-columns: min(78vw, 320px) minmax(0, 1fr) 0; }
+  .layout.sidebars-visible .sidebar.right { display: none; }
+}
+
+.context-menu{position:fixed;z-index:100;min-width:220px;background:#20232b;border:1px solid var(--line);border-radius:9px;padding:5px;box-shadow:0 10px 35px rgba(0,0,0,.55)}
+.context-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:9px 10px}
+.context-menu button:hover,.context-menu button:focus{background:#315ea7}
+#actionDialogText{width:100%;min-height:280px;background:#101218;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:10px;resize:vertical}
+#actionColorFields{display:grid;gap:10px}
+#actionColorFields label{display:grid;grid-template-columns:1fr 80px;align-items:center}
+#actionColorFields input[type=color]{width:80px;height:42px;padding:2px}
+.doc-node.selected .doc-icon rect{stroke:#ffcc4d;stroke-width:4}
+.doc-node.selected .doc-title{fill:#ffcc4d;font-weight:700}
+
+.file-row.selected { background:#315ea7; outline:1px solid #6ea0ff; }
+.layout.sidebars-hidden { grid-template-columns:0 minmax(0,1fr) 0 !important; }
+.layout.sidebars-hidden .sidebar { visibility:hidden !important; width:0 !important; min-width:0 !important; overflow:hidden !important; border:0 !important; }
+.layout.sidebars-hidden .canvas-wrap { display:block !important; visibility:visible !important; min-width:0 !important; min-height:0 !important; }
+
+.doc-title { font-size: 15px !important; }
+.reference-row.selected { background:#315ea7; outline:1px solid #6ea0ff; }
+.canvas-wrap { position:relative; z-index:1; }
+.sidebar { position:relative; z-index:2; }
+
+
+/* v10: Seitenleisten werden unabhängig vom Canvas geschaltet. */
+body.sidebars-hidden .layout {
+  display: grid !important;
+  grid-template-columns: 0 minmax(0, 1fr) 0 !important;
+}
+body.sidebars-hidden .sidebar {
+  display: none !important;
+}
+body.sidebars-hidden .canvas-wrap {
+  display: block !important;
+  visibility: visible !important;
+  grid-column: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+/* v10: begrenzte, mehrzeilige Dateititel außerhalb der Uhr. */
+.doc-title-box {
+  overflow: visible;
+  pointer-events: none;
+}
+.doc-title-html {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  column-gap: .28em;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.2;
+  font-weight: 500;
+  overflow: hidden;
+  white-space: normal;
+}
+.doc-title-word {
+  display: inline-block;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.doc-title-html.right {
+  justify-content: flex-start;
+  text-align: left;
+}
+.doc-title-html.left {
+  justify-content: flex-end;
+  text-align: right;
+}
+.doc-title-html.center {
+  justify-content: center;
+  text-align: center;
+}
+.doc-node.selected .doc-title-html {
+  color: #ffcc4d;
+  font-weight: 700;
+}
+
+
+/* v11: Browserzoom wird auf dem Canvas durch Uhrzoom ersetzt. */
+.clock-canvas {
+  overscroll-behavior: contain;
+}
+
+
+/* v12: Rastertitel bleiben vollständig innerhalb des Uhrkreises. */
+.raster-title-box {
+  overflow: visible;
+  pointer-events: none;
+}
+.raster-title-html {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.18;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  white-space: normal;
+  padding: 4px 8px;
+}
+.raster-title-html.major {
+  font-size: 17px;
+  font-weight: 700;
+}
+.clock-canvas {
+  cursor: grab;
+}
+.clock-canvas:active {
+  cursor: grabbing;
+}
+.doc-node {
+  cursor: pointer;
+}
+
+.doc-node{touch-action:none}
+
+.file-row.selected,.reference-row.selected{background:#315ea7;outline:1px solid #6ea0ff}
+
+
+/* v16 */
+.raster-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.doc-node,
+.doc-node *,
+.doc-title-box,
+.doc-title-html {
+  pointer-events: all !important;
+}
+.raster-title-box {
+  overflow: hidden;
+  pointer-events: none;
+}
+.raster-title-html {
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 3px 6px;
+}
+
+
+/* v18: vollständig getrennte Canvas-Trefferflächen */
+.doc-hit-area {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.canvas-file-target,
+.canvas-file-target * {
+  pointer-events: all;
+}
+.canvas-file-target {
+  cursor: pointer;
+  touch-action: none;
+}
+.canvas-file-target.dragging {
+  cursor: grabbing;
+}
+.progress-arc {
+  pointer-events: stroke;
+  cursor: grab;
+}
+.raster-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+
+/* v20: größere unsichtbare Raster-Trefferflächen */
+.raster-hit {
+  stroke: transparent !important;
+  stroke-width: 28 !important;
+  pointer-events: stroke !important;
+  cursor: pointer;
+}
+
+/* v20: Inhaltsvorschau auf der gegenüberliegenden Seite */
+.sidebar {
+  position: relative;
+}
+.side-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+.side-preview header {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.side-preview header strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.side-preview-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+
+/* v22: Vorschau wird an Ort und Stelle zum Editor */
+.side-preview-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.preview-edit-action {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* v22: Trennlinie mit eigenem, editierbarem Mittelteil */
+.reference-row.separator {
+  display: grid;
+  grid-template-columns: minmax(18px, 1fr) auto minmax(18px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+.separator-line {
+  height: 1px;
+  background: currentColor;
+  opacity: .72;
+  pointer-events: none;
+}
+.separator-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 5px 7px;
+  border-radius: 5px;
+}
+.separator-title:active {
+  background: #315ea7;
+}
+.separator-dragging {
+  opacity: .72;
+  outline: 2px solid #ffcc4d;
+  z-index: 30;
+}
+
+/* v22: Wischgeste */
+.file-row,
+.reference-row {
+  transition: transform .16s ease;
+  will-change: transform;
+}
+.file-row.swiping,
+.reference-row.swiping {
+  transition: none;
+}
+.swipe-delete-ready {
+  background: #7a2727 !important;
+}
+
+
+/* v24: Safari-Doppeltippzoom nur im Vorschautext unterbinden */
+.side-preview,
+.side-preview-body,
+.preview-text,
+.side-preview-editor {
+  touch-action: manipulation;
+}
+
+/* v24: Dateien und Trennlinien im Stehsatz nach Langdruck verschieben */
+.reference-row {
+  touch-action: pan-y;
+}
+.reference-row.reference-dragging {
+  opacity: .78;
+  outline: 2px solid #ffcc4d;
+  background: #30343e;
+  z-index: 40;
+  position: relative;
+  transform: scale(1.02);
+  transition: none;
+}
+
+.project-dialog select { width: 100%; min-height: 260px; background: #101218; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+.project-actions .spacer { flex: 1; }
+
+/* v27: Signalwortfarben und projektinterner Papierkorb */
+.file-row.in-trash .file-name { color: var(--muted); }
+.title-color-dialog { width:min(650px, calc(100vw - 24px)); }
+.title-color-grid-head, .title-color-row { display:grid; grid-template-columns:minmax(0,1fr) 120px; gap:12px; align-items:center; }
+.title-color-grid-head { color:var(--muted); font-size:13px; padding:0 0 2px; }
+.title-color-rows { display:grid; gap:8px; }
+.title-color-row input { margin:0; }
+.title-color-row input[type=color] { width:100%; height:44px; padding:2px; }
+.title-color-plus-row { display:grid; grid-template-columns:minmax(0,1fr) 120px; gap:12px; margin-top:8px; }
+.title-color-plus { grid-column:1; justify-self:start; width:42px; height:36px; padding:0; font-size:24px; font-weight:700; line-height:1; }
+.reference-row .file-name span { white-space:inherit; }
+
+
+.reference-add-button {
+  width: 42px;
+  height: 36px;
+  margin: 8px 8px 10px;
+  border-radius: 7px;
+  border: 1px solid #687083;
+  background: #303540;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+.reference-add-button:active {
+  background: #454c5b;
+}
+
+
+/* v29: dauerhafte Verbindungsfehler sichtbar und abrufbar */
+.status.clickable { cursor: pointer; outline: 1px solid #b95b5b; }
+.error-dialog { width: min(820px, calc(100vw - 24px)); }
+.error-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  background: #101218;
+  color: #f2f2f2;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+
+/* v30: Uhr-Dateititel brechen nur zwischen vollständigen Wörtern um. */
+.doc-title-word > span { white-space: nowrap; }
+
+
+/* v31: Dateititel an der Uhr vollständig als natives SVG. */
+.doc-title-svg {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  font-weight: 500;
+  pointer-events: none;
+}
+.doc-node.selected .doc-title-svg {
+  font-weight: 700;
+}
+
+
+/* v31.4: Nur Diagnoseanzeige vor Microsoft-Anmeldung. */
+.auth-diag-dialog {
+  width: min(760px, calc(100vw - 32px));
+}
+.auth-diag-text {
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111318;
+  color: var(--text);
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

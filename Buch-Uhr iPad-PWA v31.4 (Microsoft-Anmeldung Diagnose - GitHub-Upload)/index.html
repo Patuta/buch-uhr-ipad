@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#17191f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Buch-Uhr">
+  <title>Buch-Uhr iPad v31.4</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button id="sidebarToggle" class="icon-button" aria-label="Seitenleisten umschalten">☰</button>
+    <div class="brand">
+      <strong>Buch-Uhr</strong>
+      <span id="projectName">iPad-PWA</span>
+    </div>
+    <div id="syncStatus" class="status offline">Nicht verbunden</div>
+    <button id="newTextBtn" class="icon-button" title="Neue Textdatei">N</button>
+    <button id="renameBtn" class="icon-button" title="Umbenennen">F2</button>
+    <button id="deleteBtn" class="icon-button" title="In den Papierkorb verschieben">⌫</button>
+    <button id="zoomOutBtn" class="icon-button" title="Verkleinern">−</button>
+    <button id="zoomInBtn" class="icon-button" title="Vergrößern">+</button>
+    <button id="fitBtn" class="icon-button" title="Uhr einpassen">0</button>
+    <button id="undoBtn" class="icon-button" title="Rückgängig">↶</button>
+    <button id="redoBtn" class="icon-button" title="Wiederherstellen">↷</button>
+    <button id="projectsBtn">Projekte</button>
+    <button id="syncBtn" class="primary">Synchronisieren</button>
+    <button id="settingsBtn" class="icon-button" aria-label="Einstellungen">⚙</button>
+  </header>
+
+  <main id="appLayout" class="layout sidebars-visible">
+    <aside id="leftPanel" class="sidebar left">
+      <h2>Projektdateien</h2>
+      <div class="sidebar-actions">
+        <button id="refreshFilesBtn">Aktualisieren</button>
+      </div>
+      <div id="fileList" class="file-list"></div>
+      <section id="leftPreview" class="side-preview hidden">
+        <header>
+          <strong id="leftPreviewTitle"></strong>
+          <button id="leftPreviewClose" class="icon-button" aria-label="Vorschau schließen">✕</button>
+        </header>
+        <div id="leftPreviewBody" class="side-preview-body"></div>
+      </section>
+    </aside>
+
+    <section class="canvas-wrap">
+      <svg id="clockCanvas" class="clock-canvas" viewBox="-720 -520 1440 1040" role="application"
+           aria-label="Buch-Uhr">
+        <g id="clockLayer"></g>
+        <g id="progressLayer"></g>
+        <g id="rasterTitleLayer"></g>
+        <g id="documentLayer"></g>
+      </svg>
+      <div id="emptyHint" class="empty-hint hidden">Noch kein Projekt geladen.</div>
+    </section>
+
+    <aside id="rightPanel" class="sidebar right">
+      <h2>Stehsatz</h2>
+      <div id="referenceList" class="reference-list"></div>
+      <button id="referenceAddBtn" class="reference-add-button" type="button" title="Neue Textdatei im Stehsatz">+</button>
+      <section id="rightPreview" class="side-preview hidden">
+        <header>
+          <strong id="rightPreviewTitle"></strong>
+          <button id="rightPreviewClose" class="icon-button" aria-label="Vorschau schließen">✕</button>
+        </header>
+        <div id="rightPreviewBody" class="side-preview-body"></div>
+      </section>
+    </aside>
+  </main>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" id="settingsForm">
+      <h2>OneDrive-Verbindung</h2>
+      <label>
+        Microsoft-Anwendungs-ID (Client-ID)
+        <input id="clientIdInput" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000">
+      </label>
+      <label>
+        Mandant
+        <input id="tenantInput" autocomplete="off" value="common">
+      </label>
+      <label>
+        OneDrive-Projektstamm
+        <input id="folderInput" autocomplete="off" placeholder="Buch-Uhr">
+      </label>
+      <p class="help">Hier gehört der <b>übergeordnete Ordner</b> hinein, in dem die einzelnen Buch-Uhr-Projekte liegen. Beispiel: Liegt ein Projekt unter <code>Thomas/Thomas Buch/Thomas Uhr</code>, ist der Projektstamm <code>Thomas/Thomas Buch</code>. Schrägstriche <code>/</code> und Windows-Backslashes werden akzeptiert.</p>
+      <div class="dialog-actions">
+        <button value="cancel">Abbrechen</button>
+        <button id="saveSettingsBtn" value="default" class="primary">Speichern und anmelden</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="authDiagDialog" class="auth-diag-dialog">
+    <form method="dialog">
+      <h2>Microsoft-Anmeldung – Diagnose v31.4</h2>
+      <p class="help">Diese Werte verwendet die Buch-Uhr unmittelbar vor der Weiterleitung zu Microsoft.</p>
+      <pre id="authDiagText" class="auth-diag-text"></pre>
+      <div class="dialog-actions">
+        <button id="authDiagCancelBtn" value="cancel">Abbrechen</button>
+        <button id="authDiagContinueBtn" value="default" class="primary">Weiter zu Microsoft</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="projectDialog" class="project-dialog">
+    <form method="dialog">
+      <h2>Buch-Uhr-Projekt</h2>
+      <p class="help">Projekte unter <code>OneDrive/Buch-Uhr</code>. Zuletzt verwendete Projekte stehen oben.</p>
+      <select id="projectList" size="10" aria-label="Buch-Uhr-Projekte"></select>
+      <div class="dialog-actions project-actions">
+        <button id="newProjectBtn" type="button">Neues Projekt …</button>
+        <span class="spacer"></span>
+        <button id="closeProjectBtn" value="cancel">Abbrechen</button>
+        <button id="openProjectBtn" type="button" class="primary">Öffnen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="editorDialog" class="editor-dialog">
+    <form method="dialog">
+      <header>
+        <h2 id="editorTitle">Datei</h2>
+        <button id="closeEditorBtn" value="cancel" class="icon-button">✕</button>
+      </header>
+      <textarea id="editorText" spellcheck="true"></textarea>
+      <div id="docxMessage" class="docx-message hidden">
+        Word-Dateien werden in OneDrive beziehungsweise Word geöffnet.
+      </div>
+      <footer>
+        <span id="editorMeta"></span>
+        <button id="openExternalBtn" type="button">In OneDrive öffnen</button>
+        <button id="saveEditorBtn" type="button" class="primary">Speichern</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="contextMenu" class="context-menu hidden">
+    <button data-action="open">Öffnen</button>
+    <button data-action="rename">Umbenennen</button>
+    <button data-action="remove">In Papierkorb verschieben</button>
+    <button data-action="newText">Neue Textdatei</button>
+    <button data-action="raster">Rastertitel bearbeiten</button>
+    <button data-action="norm">Normseiten</button>
+    <button data-action="colors">Farben</button>
+    <button data-action="titleColors">Farbe</button>
+    <button data-action="fit">Uhr einpassen</button>
+  </div>
+
+  <dialog id="actionDialog">
+    <form method="dialog">
+      <h2 id="actionDialogTitle"></h2>
+      <label id="actionDialogLabel">
+        <input id="actionDialogInput">
+      </label>
+      <label id="newTextTitleLabel" class="hidden">
+        Titel
+        <input id="newTextTitleInput" type="text" placeholder="Titel der Textdatei">
+      </label>
+      <textarea id="actionDialogText" class="hidden"></textarea>
+      <div id="actionColorFields" class="hidden">
+        <label>Canvas <input id="backgroundColorInput" type="color"></label>
+        <label>Uhr <input id="clockColorInput" type="color"></label>
+        <label>Fortschritt <input id="progressColorInput" type="color"></label>
+      </div>
+      <div class="dialog-actions">
+        <button value="cancel">Abbrechen</button>
+        <button id="actionDialogSaveBtn" type="button" class="primary">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="titleColorDialog" class="title-color-dialog">
+    <form method="dialog">
+      <h2>Farbe</h2>
+      <p class="help">Nur das jeweilige Signalwort wird im Dateititel farbig und fett dargestellt. Mehrere Signalwörter können im selben Titel verschiedene Farben haben.</p>
+      <div class="title-color-grid-head"><span>Signalwort</span><span>Farbe</span></div>
+      <div id="titleColorRows" class="title-color-rows"></div>
+      <div class="title-color-plus-row">
+        <button id="titleColorPlus" type="button" class="title-color-plus" title="Weitere Farbregel">+</button>
+      </div>
+      <div class="dialog-actions">
+        <button value="cancel">Abbrechen</button>
+        <button id="titleColorSave" type="button" class="primary">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="errorDialog" class="error-dialog">
+    <form method="dialog">
+      <h2>Verbindungsfehler</h2>
+      <pre id="errorDetailsText"></pre>
+      <div class="dialog-actions">
+        <button id="errorDetailsClose" type="button" class="primary">Schließen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="./vendor/msal-browser.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
