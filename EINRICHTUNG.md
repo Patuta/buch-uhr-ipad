@@ -391,3 +391,12 @@ Wenn beim Öffnen eines älteren Projekts noch eine solche DOCX-Datei übrig ist
 ## Änderung in v31.4
 
 Nur Diagnose: Vor dem ersten Microsoft-Login zeigt die PWA Client-ID, Mandant, Authority, Authorize-Endpunkt, Redirect-URI, Redirect-Startseite, Scopes, aktuelle URL und Browserkennung an. Erst nach Bestätigung wird zu Microsoft weitergeleitet. Keine Änderung an OneDrive-, Projekt-, Synchronisations- oder Uhrlogik.
+
+
+## Änderung in v32
+
+- Die linke Projektdatei-Leiste startet mit zugeklappten Projektordnern.
+- Uhr, Stehsatz und Papierkorb lassen sich durch Antippen auf- und zuklappen.
+- Der Auf-/Zu-Zustand der Ordner wird lokal gespeichert und beim nächsten Start wiederhergestellt.
+- Dateien im Projektstamm bleiben immer direkt sichtbar.
+- Die rechte Stehsatz-Leiste bleibt unverändert.
