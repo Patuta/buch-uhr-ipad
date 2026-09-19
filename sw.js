@@ -1,9 +1,9 @@
-const CACHE = "buch-uhr-ipad-v32";
+const CACHE = "buch-uhr-ipad-v32.1";
 const SHELL = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js",
+  "./styles.css?v=32.1",
+  "./app.js?v=32.1",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
