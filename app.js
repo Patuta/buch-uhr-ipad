@@ -3374,7 +3374,7 @@ renderClock();
 applyViewZoom();
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(console.error);
+  navigator.serviceWorker.register("./sw.js?v=32.1").catch(console.error);
 }
 
 async function startApp() {
